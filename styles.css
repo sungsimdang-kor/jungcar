@@ -48,7 +48,9 @@ button { cursor:pointer; }
   border:0;
   background:transparent;
   color:#b8c5d8;
+  font-size:16px;
   font-weight:800;
+  min-height:48px;
   text-align:left;
   border-radius:10px;
   padding:13px 14px;
@@ -63,6 +65,9 @@ button { cursor:pointer; }
   padding-top:18px;
   display:grid;
 }
+.settings-button { display:flex;align-items:center;gap:11px; }
+.settings-icon { font-size:21px;line-height:1; }
+.top.login-top { display:none; }
 .main { padding:34px clamp(24px,4vw,56px) 70px;min-width:0; }
 .top { display:flex;align-items:flex-end;justify-content:space-between;max-width:1420px;margin:0 auto 28px; }
 .top p { margin:0 0 7px;color:var(--blue);font-size:11px;font-weight:900;letter-spacing:.12em; }
@@ -413,8 +418,8 @@ textarea { resize:vertical; }
   padding:34px;
 }
 .login-card span { color:var(--blue);font-size:11px;font-weight:900;letter-spacing:.12em; }
-.login-brand { display:flex;flex-direction:column;align-items:flex-start;justify-content:center; }
-.login-logo { display:block;width:min(230px,80%);height:auto;margin:0 0 24px; }
+.login-brand { display:flex;flex-direction:column;align-items:center;justify-content:center; }
+.login-logo { display:block;width:min(230px,80%);height:auto;margin:0; }
 .login-card h2 { color:var(--navy);font-size:36px;letter-spacing:-.04em;margin:8px 0 10px; }
 .login-card p { color:var(--muted);line-height:1.65; }
 .login-card form { display:grid;gap:12px; }
