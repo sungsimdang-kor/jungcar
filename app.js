@@ -147,6 +147,7 @@ function render() {
     renderLogin();
     return;
   }
+  $(".top").classList.remove("login-top");
   $$("[data-tab]").forEach(btn => btn.classList.toggle("active", btn.dataset.tab === activeTab));
   if ($(".total-count")) $(".total-count").textContent = `${fmt(leads.length)}건`;
   $(".page-title").textContent = activeTab === "overview" ? "고객 문의 현황" : activeTab === "customers" ? "전체 고객" : activeTab === "analysis" ? "고객 문의 분석" : "설정";
@@ -158,19 +159,18 @@ function render() {
 }
 
 function renderLogin(message = "") {
-  $(".page-title").textContent = "로그인";
+  $(".top").classList.add("login-top");
+  $(".page-title").textContent = "";
   if ($(".total-count")) $(".total-count").textContent = "보호됨";
   $$("[data-tab]").forEach(btn => btn.classList.remove("active"));
   app.innerHTML = `
     <section class="login-card">
       <div class="login-brand">
         <img class="login-logo" src="https://xn--tv-9z9j31p.com/assets/admin/images/logo/171/logo.png" alt="중카TV">
-        <h2>로그인</h2>
       </div>
       <form id="loginForm">
         <label>아이디<input name="username" autocomplete="username" required></label>
         <label>비밀번호<input name="password" type="password" autocomplete="current-password" required></label>
-        <label class="check"><input name="autoPush" type="checkbox" checked> 고객 저장 시 구글시트 자동 반영</label>
         <button type="submit">로그인</button>
         <p class="status">${escapeHtml(message)}</p>
       </form>
@@ -181,7 +181,6 @@ function renderLogin(message = "") {
 async function login(event) {
   event.preventDefault();
   const form = new FormData(event.currentTarget);
-  saveSettings({ autoPush: form.get("autoPush") === "on" });
   try {
     const result = await sheetJsonp("login", {
       username: String(form.get("username") || ""),
@@ -541,7 +540,7 @@ function openLeadForm(initialPhone="", existing=null) {
   const r=existing||{};
   const models=(r.models||[]);
   const html=`<dialog class="modal lead-modal" aria-labelledby="leadModalTitle"><form method="dialog" id="leadForm">
-    <div class="modal-head"><div><span>${existing ? "CONSULTATION EDIT" : "NEW CONSULTATION"}</span><h2 id="leadModalTitle">${existing?"상담 내역 수정":"고객·상담 추가"}</h2></div><button value="cancel" class="icon-button" aria-label="닫기">×</button></div>
+    <div class="modal-head"><div><span>${existing ? "CONSULTATION EDIT" : "NEW CONSULTATION"}</span><h2 id="leadModalTitle">${existing?"상담 내역 수정":"고객·상담 추가"}</h2></div><button type="button" class="icon-button" data-close-modal aria-label="닫기">×</button></div>
     <section class="form-section"><h3>기본 정보</h3><div class="form-grid">
       ${formField("문의 날짜", `<input name="inquiryDate" type="date" value="${r.inquiryDate||today()}" required>`)}
       ${formField("연락처", `<input name="phone" placeholder="010-0000-0000" value="${escapeHtml(initialPhone||r.phone||"")}" required>`)}
@@ -568,12 +567,13 @@ function openLeadForm(initialPhone="", existing=null) {
       ${formField("문의 주제", `<input name="topics" value="${escapeHtml((r.topics||[]).join(", "))}" placeholder="가격, 옵션, 방문 등 쉼표로 구분">`, "full")}
       ${formField("희망 조건·상담 메모", `<textarea name="conditionRaw" rows="4" placeholder="핵심 조건을 간략히 입력">${escapeHtml(r.conditionRaw||"")}</textarea>`, "full")}
     </div></section>
-    <menu><button value="cancel" class="secondary">취소</button><button id="saveLead" value="default">저장</button></menu>
+    <menu><button type="button" class="secondary" data-close-modal>취소</button><button id="saveLead" value="default">저장</button></menu>
   </form></dialog>`;
   document.body.insertAdjacentHTML("beforeend", html);
   const dlg=$("dialog.modal");
   document.body.classList.add("modal-open");
   dlg.showModal();
+  dlg.querySelectorAll("[data-close-modal]").forEach(button => button.addEventListener("click", () => dlg.close()));
   requestAnimationFrame(() => dlg.querySelector('[name="phone"]')?.focus({ preventScroll:true }));
   const conditionInput=dlg.querySelector('[name="conditionRaw"]');
   conditionInput.addEventListener("input", () => {
