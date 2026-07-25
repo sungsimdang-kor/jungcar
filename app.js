@@ -188,10 +188,8 @@ function renderOverview() {
   const dated = leads.filter(r => r.inquiryDate);
   const dates = uniq(dated.map(r => r.inquiryDate));
   const byDate = count(dated.map(r => r.inquiryDate));
-  const byMonth = count(dated.map(r => (r.inquiryDate || "").slice(0,7)));
   const byType = count(leads.map(r => r.inquiryType));
   const byModel = count(leads.flatMap(r => r.models || []));
-  const byTopic = count(leads.flatMap(r => (r.topics && r.topics.length ? r.topics : topicsFromText(r.conditionRaw, r.inquiryType, r.financeStatus))));
   const latestDate = dated.map(r => parseDate(r.inquiryDate)).filter(Boolean).sort((a,b) => b - a)[0] || parseDate(today());
   const latestKey = dateKey(latestDate);
   const currentMonth = monthKey(latestDate);
@@ -219,9 +217,7 @@ function renderOverview() {
     <section class="grid">
       ${card("일별 문의 현황", "문의 날짜 기준 상담 건수", verticalBars(Object.entries(byDate).sort()), "wide")}
       ${card("문의 종류", "구매·판매·할부 등", donut(topEntries(byType,7)), "chart")}
-      ${card("주요 문의 내용", "희망조건 기반 태그", donut(topEntries(byTopic,8)), "chart")}
       ${card("인기 차종 TOP 10", "전체 DB 기준 · 복수 차종은 각각 집계", rankedBars(topEntries(byModel,10)))}
-      ${card("월별 문의 현황", "월별 총 상담량", verticalBars(Object.entries(byMonth).sort()), "wide")}
     </section>`;
 }
 
