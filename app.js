@@ -144,7 +144,8 @@ function renderLogin(message = "") {
   $$("[data-tab]").forEach(btn => btn.classList.remove("active"));
   app.innerHTML = `
     <section class="login-card">
-      <div>
+      <div class="login-brand">
+        <img class="login-logo" src="https://xn--tv-9z9j31p.com/assets/admin/images/logo/171/logo.png" alt="중카TV">
         <span>SECURE JUNGCAR CRM</span>
         <h2>로그인</h2>
       </div>
