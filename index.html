@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>중카TV 고객 DB · Jungcar</title>
+  <meta name="description" content="중카TV 고객 문의, 희망 차종, 예산, 방문 여부를 관리하고 구글시트와 동기화하는 정적 CRM 대시보드">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="layout">
+    <aside class="side">
+      <div class="brand"><span class="brand-mark">중카</span><div><b>중카TV</b><small>Jungcar CRM</small></div></div>
+      <nav class="nav" aria-label="주요 메뉴">
+        <button data-tab="overview" class="active">현황</button>
+        <button data-tab="customers">고객</button>
+        <button data-tab="analysis">분석</button>
+        <button data-tab="sync">구글시트</button>
+      </nav>
+      <div class="side-foot"><small>Numbers 최신 파일 기준</small><button onclick="exportCsv()">CSV 백업</button></div>
+    </aside>
+    <section class="main">
+      <header class="top"><div><p>JOONGKA TV CRM</p><h1 class="page-title">고객 문의 현황</h1></div><div class="source"><b class="total-count">-</b><span>고객관리20260723_스크린샷반영_완성.numbers</span></div></header>
+      <div id="app"></div>
+    </section>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>
