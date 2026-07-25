@@ -1,5 +1,6 @@
 
 const SHEET_HEADERS = ["사이트ID","문의 날짜","연락처","문의 타입","문의 종류","희망 차량_1","희망 차량_2","희망 차량_3","최소 예산","최대 예산","구매 예정일","할부 여부","방문 여부","담당자","문의 주제","유입 경로","상담 결과","후속 연락일","희망 조건","수정일시"];
+const FIXED_APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzLkvPc0LutnFOszyKJd0VYlaU13IAz21PBbWISynrKO7UGfbcY5bp4ClU5lphabAx4/exec";
 const SETTINGS_KEY = "jungcar-sheet-sync";
 const SESSION_KEY = "jungcar-session";
 let leads = [];
@@ -42,8 +43,8 @@ const topicsFromText = (conditionRaw = "", inquiryType = "", financeStatus = "")
   ];
   return rules.filter(([, words]) => words.some(word => raw.includes(word.toLowerCase()))).map(([label]) => label);
 };
-const getSettings = () => JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{"endpoint":"","autoPush":true}');
-const saveSettings = (settings) => localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+const getSettings = () => ({ autoPush: true, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}"), endpoint: FIXED_APPS_SCRIPT_URL });
+const saveSettings = (settings) => localStorage.setItem(SETTINGS_KEY, JSON.stringify({ endpoint: FIXED_APPS_SCRIPT_URL, autoPush: settings.autoPush !== false }));
 const isLoggedIn = () => Boolean(session?.sessionToken && getSettings().endpoint);
 
 function duplicateKey(row) {
@@ -138,19 +139,16 @@ function renderLogin(message = "") {
   $(".page-title").textContent = "로그인";
   if ($(".total-count")) $(".total-count").textContent = "보호됨";
   $$(".nav button").forEach(btn => btn.classList.remove("active"));
-  const settings = getSettings();
   app.innerHTML = `
     <section class="login-card">
       <div>
         <span>SECURE JUNGCAR CRM</span>
-        <h2>로그인이 필요합니다</h2>
-        <p>고객 전화번호와 상담 데이터는 HTML에 포함하지 않고, 로그인 성공 후 구글시트에서만 불러옵니다.</p>
+        <h2>로그인</h2>
       </div>
       <form id="loginForm">
-        <label>Apps Script 웹앱 URL<input name="endpoint" value="${escapeHtml(settings.endpoint || "")}" placeholder="https://script.google.com/macros/s/.../exec" required></label>
         <label>아이디<input name="username" autocomplete="username" required></label>
         <label>비밀번호<input name="password" type="password" autocomplete="current-password" required></label>
-        <label class="check"><input name="autoPush" type="checkbox" ${settings.autoPush !== false ? "checked" : ""}> 고객 저장 시 구글시트 자동 반영</label>
+        <label class="check"><input name="autoPush" type="checkbox" checked> 고객 저장 시 구글시트 자동 반영</label>
         <button type="submit">로그인</button>
         <p class="status">${escapeHtml(message)}</p>
       </form>
@@ -161,8 +159,7 @@ function renderLogin(message = "") {
 async function login(event) {
   event.preventDefault();
   const form = new FormData(event.currentTarget);
-  const endpoint = String(form.get("endpoint") || "").trim();
-  saveSettings({ endpoint, autoPush: form.get("autoPush") === "on" });
+  saveSettings({ autoPush: form.get("autoPush") === "on" });
   try {
     const result = await sheetJsonp("login", {
       username: String(form.get("username") || ""),
@@ -279,10 +276,9 @@ function renderSync() {
   app.innerHTML = `
     <section class="sync-hero">
       <div><span>GOOGLE SHEETS SYNC</span><h2>GitHub Pages ↔ Google Sheets</h2><p>로그인 후 발급된 세션으로 구글시트와 양방향 동기화합니다. 아이디와 비밀번호는 HTML/GitHub/스프레드시트에 저장되지 않습니다.</p></div>
-      <ol><li>구글시트에서 확장 프로그램 → Apps Script</li><li><a href="apps-script.js" target="_blank">apps-script.js</a> 내용을 붙여넣기</li><li>Apps Script의 스크립트 속성에 아이디와 비밀번호 해시 저장</li><li>웹앱 배포 후 로그인 화면에 URL 입력</li></ol>
+      <ol><li>구글시트에서 확장 프로그램 → Apps Script</li><li><a href="apps-script.js" target="_blank">apps-script.js</a> 내용을 붙여넣기</li><li>Apps Script의 스크립트 속성에 아이디와 비밀번호 해시 저장</li><li>사이트는 고정된 연동 주소로 자동 접속</li></ol>
     </section>
     <section class="panel sync-panel">
-      <label>Apps Script 웹앱 URL<input id="syncEndpoint" value="${escapeHtml(settings.endpoint || "")}" placeholder="https://script.google.com/macros/s/.../exec"></label>
       <label class="check"><input id="syncAuto" type="checkbox" ${settings.autoPush ? "checked" : ""}> 고객 저장 시 구글시트 자동 반영</label>
       <div class="sync-buttons"><button id="saveSync">설정 저장</button><button id="testSync">연결 테스트</button><button id="pullSheet">시트 → 사이트 새로고침</button><button id="pushSheet">현재 사이트 → 시트 반영</button><button id="logout">로그아웃</button></div>
       <p id="syncStatus" class="status"></p>
@@ -295,14 +291,14 @@ function renderSync() {
 }
 
 function saveSyncForm() {
-  saveSettings({ endpoint: $("#syncEndpoint").value.trim(), autoPush: $("#syncAuto").checked });
+  saveSettings({ autoPush: $("#syncAuto").checked });
   $("#syncStatus").textContent = "연동 설정을 저장했습니다.";
 }
 
 function sheetJsonp(action, payload = {}) {
   const settings = getSettings();
   if (!settings.endpoint) return Promise.reject(new Error("Apps Script URL을 먼저 입력하세요."));
-  if (action !== "login" && !session?.sessionToken) return Promise.reject(new Error("로그인이 필요합니다."));
+  if (action !== "login" && !session?.sessionToken) return Promise.reject(new Error("로그인 후 이용하세요."));
   return new Promise((resolve, reject) => {
     const callback = `jungcar_cb_${Date.now()}_${Math.random().toString(36).slice(2)}`;
     const url = new URL(settings.endpoint);
@@ -328,7 +324,7 @@ function sheetJsonp(action, payload = {}) {
 
 async function sheetPost(action, payload = {}) {
   const settings = getSettings();
-  if (!session?.sessionToken) throw new Error("로그인이 필요합니다.");
+  if (!session?.sessionToken) throw new Error("로그인 후 이용하세요.");
   const res = await fetch(settings.endpoint, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ sessionToken: session.sessionToken, action, ...payload }) });
   const data = await res.json();
   if (!res.ok || data.ok === false) throw new Error(data.error || "구글시트 POST 요청 실패");
