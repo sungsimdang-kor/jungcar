@@ -19,6 +19,17 @@ const topEntries = (obj, limit=8) => Object.entries(obj).sort((a,b) => b[1] - a[
 const phoneKey = (phone) => (phone || "").replace(/\D/g, "");
 const validPhone = (phone) => /^010\d{8}$/.test(phoneKey(phone));
 const normalizePhone = (phone) => validPhone(phone) ? `${phoneKey(phone).slice(0,3)}-${phoneKey(phone).slice(3,7)}-${phoneKey(phone).slice(7)}` : (phone || "").trim();
+const formatPhoneInput = (value = "") => {
+  const digits = String(value).replace(/\D/g, "").slice(0, 11);
+  if (digits.length <= 3) return digits;
+  if (digits.length <= 7) return `${digits.slice(0,3)}-${digits.slice(3)}`;
+  return `${digits.slice(0,3)}-${digits.slice(3,7)}-${digits.slice(7)}`;
+};
+const formatThousands = (value = "") => {
+  const digits = String(value ?? "").replace(/\D/g, "");
+  return digits ? Number(digits).toLocaleString("ko-KR") : "";
+};
+const parseFormattedNumber = (value = "") => Number(String(value).replace(/\D/g, "")) || null;
 const parseDate = (value) => /^\d{4}-\d{2}-\d{2}$/.test(value || "") ? new Date(`${value}T00:00:00+09:00`) : null;
 const dateKey = (date) => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul" }).format(date);
 const monthKey = (date) => dateKey(date).slice(0, 7);
@@ -27,6 +38,18 @@ const addDays = (date, days) => { const next = new Date(date); next.setDate(next
 const addMonths = (date, months) => { const next = new Date(date); next.setMonth(next.getMonth() + months); return next; };
 const weekdayLabels = ["일요일","월요일","화요일","수요일","목요일","금요일","토요일"];
 const selected = (value, expected) => value === expected ? "selected" : "";
+// 중카TV 국산차 검색의 제조사별 '모델' 단계 기준. 세부모델·등급은 제외합니다.
+const MODEL_CATALOG = {
+  "현대":["그랜저","쏘나타","아반떼","스타렉스","싼타페","투싼","팰리세이드","스타리아","코나","제네시스","i30","i40","넥쏘","맥스크루즈","베뉴","베라쿠르즈","벨로스터","솔라티","아슬란","아이오닉 5","아이오닉 6","아이오닉 9","아이오닉","에쿠스","엑센트","캐스퍼","갤로퍼","그레이스","다이너스티","라비타","마르샤","베르나","아토스","엘란트라","싼타모","스텔라","스쿠프","엑셀","클릭","테라칸","투스카니","트라제XG","티뷰론","포니","리베로","프레스토","블루온"],
+  "제네시스":["EQ900","G70","G80","G90","GV60","GV70","GV80"],
+  "기아":["K3","K5","K7","K8","K9","카니발","쏘렌토","모하비","모닝","레이","셀토스","스포티지","EV3","EV4","EV5","EV6","EV9","PV5","니로","로체","스토닉","스팅어","쏘울","오피러스","카렌스","포르테","프라이드","봉고3미니버스","레토나","리오","록스타","베스타","복사","비스토","세피아","슈마","스펙트라","쎄라토","아벨라","엑스트렉","엔터프라이즈","엘란","옵티마","카스타","캐피탈","콩코드","크레도스","타스만","타우너","타이탄","토픽","파크타운","포텐샤","프레지오"],
+  "르노코리아(삼성)":["세닉","QM3","QM5","QM6","SM3","SM5","SM6","SM7","XM3","그랑 콜레오스","마스터","아르카나","조에","캡처","클리오","트위지","필랑트"],
+  "KG모빌리티(쌍용)":["코란도","티볼리","렉스턴","토레스","액티언","체어맨","무쏘","카이런","로디우스","이스타나","카리스타"],
+  "쉐보레":["스파크","말리부","크루즈","올란도","트랙스","캡티바","볼트","아베오","임팔라","이쿼녹스","트래버스","트레일블레이저","카마로","콜로라도","콜벳","타호"],
+  "대우":["마티즈","라세티","윈스톰","다마스","알페온","G2X","누비라","넥시아","라노스","르망","레간자","레조","매그너스","베리타스","브로엄","씨에로","스테이츠맨","아카디아","에스페로","젠트라","칼로스","토스카","티코","프린스","슈퍼살롱"],
+  "기타제조사":["이비온","쎄보모빌리티","SMART","MASTA","비바모빌리티","대창모터스","디피코","마이브(KST 일렉트릭)","어울림모터스","AD모터스","제이스 모빌리티"],
+};
+const CAR_MODELS = Object.entries(MODEL_CATALOG).flatMap(([maker, models]) => models.map(name => ({ maker, name })));
 const budgetLabel = (row) => {
   const min = row.budgetMin ? `${fmt(row.budgetMin)}만원` : "";
   const max = row.budgetMax ? `${fmt(row.budgetMax)}만원` : "";
@@ -536,6 +559,52 @@ function bindDetail() {
   });
 }
 function formField(label, control, cls="") { return `<label class="${cls}"><span>${label}</span>${control}</label>`; }
+function modelControl(name, value="", placeholder="") {
+  return `<div class="model-autocomplete"><input name="${name}" data-model-autocomplete autocomplete="off" aria-autocomplete="list" aria-expanded="false" value="${escapeHtml(value)}" placeholder="${escapeHtml(placeholder)}"><div class="model-suggestions" role="listbox" hidden></div></div>`;
+}
+function bindModelAutocomplete(root) {
+  root.querySelectorAll("[data-model-autocomplete]").forEach(input => {
+    const menu = input.parentElement.querySelector(".model-suggestions");
+    const closeMenu = () => {
+      menu.hidden = true;
+      menu.innerHTML = "";
+      input.setAttribute("aria-expanded", "false");
+    };
+    const selectModel = (name) => {
+      input.value = name;
+      input.dispatchEvent(new Event("change", { bubbles:true }));
+      closeMenu();
+      input.focus();
+    };
+    const showMatches = () => {
+      const query = input.value.trim().toLocaleLowerCase("ko-KR");
+      if (!query) {
+        closeMenu();
+        return;
+      }
+      const matches = CAR_MODELS.filter(item => item.name.toLocaleLowerCase("ko-KR").includes(query)).slice(0, 15);
+      if (!matches.length) {
+        menu.innerHTML = `<p>일치하는 모델이 없습니다.</p>`;
+      } else {
+        menu.innerHTML = matches.map(item => `<button type="button" role="option" data-model-value="${escapeHtml(item.name)}"><span>${escapeHtml(item.name)}</span><small>${escapeHtml(item.maker)}</small></button>`).join("");
+        menu.querySelectorAll("[data-model-value]").forEach(button => {
+          button.addEventListener("pointerdown", event => {
+            event.preventDefault();
+            selectModel(button.dataset.modelValue);
+          });
+        });
+      }
+      menu.hidden = false;
+      input.setAttribute("aria-expanded", "true");
+    };
+    input.addEventListener("input", showMatches);
+    input.addEventListener("focus", showMatches);
+    input.addEventListener("keydown", event => {
+      if (event.key === "Escape") closeMenu();
+    });
+    input.addEventListener("blur", () => setTimeout(closeMenu, 120));
+  });
+}
 function openLeadForm(initialPhone="", existing=null) {
   const r=existing||{};
   const models=(r.models||[]);
@@ -543,17 +612,17 @@ function openLeadForm(initialPhone="", existing=null) {
     <div class="modal-head"><div><span>${existing ? "CONSULTATION EDIT" : "NEW CONSULTATION"}</span><h2 id="leadModalTitle">${existing?"상담 내역 수정":"고객·상담 추가"}</h2></div><button type="button" class="icon-button" data-close-modal aria-label="닫기">×</button></div>
     <section class="form-section"><h3>기본 정보</h3><div class="form-grid">
       ${formField("문의 날짜", `<input name="inquiryDate" type="date" value="${r.inquiryDate||today()}" required>`)}
-      ${formField("연락처", `<input name="phone" placeholder="010-0000-0000" value="${escapeHtml(initialPhone||r.phone||"")}" required>`)}
+      ${formField("연락처", `<input name="phone" inputmode="numeric" autocomplete="tel" maxlength="13" placeholder="010-0000-0000" value="${escapeHtml(formatPhoneInput(initialPhone||r.phone||""))}" required>`)}
       ${formField("문의 채널", `<select name="inquiryChannel"><option ${selected(r.inquiryChannel||"전화","전화")}>전화</option><option ${selected(r.inquiryChannel,"문자")}>문자</option></select>`)}
       ${formField("문의 종류", `<input name="inquiryType" list="inquiryTypes" value="${escapeHtml(r.inquiryType||"구매")}" required><datalist id="inquiryTypes"><option value="구매"><option value="판매"><option value="판매 후 구매"><option value="할부/한도"><option value="방문 일정"><option value="수리/보증"><option value="기타/문의"></datalist>`)}
     </div></section>
     <section class="form-section"><h3>희망 차량과 예산</h3><div class="form-grid">
-      ${formField("희망 차종 1", `<input name="model1" value="${escapeHtml(models[0]||"")}" placeholder="예: 쏘나타">`)}
-      ${formField("희망 차종 2", `<input name="model2" value="${escapeHtml(models[1]||"")}" placeholder="복수 차종일 때 입력">`)}
-      ${formField("희망 차종 3", `<input name="model3" value="${escapeHtml(models[2]||"")}" placeholder="복수 차종일 때 입력">`)}
+      ${formField("희망 차종 1", modelControl("model1", models[0]||"", "예: 쏘나타"))}
+      ${formField("희망 차종 2", modelControl("model2", models[1]||"", "복수 차종일 때 입력"))}
+      ${formField("희망 차종 3", modelControl("model3", models[2]||"", "복수 차종일 때 입력"))}
       ${formField("구매 예정일", `<input name="purchaseTiming" value="${escapeHtml(r.purchaseTiming||"")}" placeholder="예: 즉시, 1개월 이내">`)}
-      ${formField("최소 예산(만원)", `<input name="budgetMin" type="number" min="0" step="100" value="${r.budgetMin||""}" placeholder="예: 1000">`)}
-      ${formField("최대 예산(만원)", `<input name="budgetMax" type="number" min="0" step="100" value="${r.budgetMax||""}" placeholder="예: 2000">`)}
+      ${formField("최소 예산(만원)", `<input name="budgetMin" inputmode="numeric" data-budget-input value="${formatThousands(r.budgetMin||"")}" placeholder="예: 1,000">`)}
+      ${formField("최대 예산(만원)", `<input name="budgetMax" inputmode="numeric" data-budget-input value="${formatThousands(r.budgetMax||"")}" placeholder="예: 2,000">`)}
       <div class="checkbox-field"><span>예산 포함 범위</span><label class="inline-check"><input name="ancillaryIncluded" type="checkbox" ${includesAncillaryCost(r) ? "checked" : ""}> 부대비용 포함</label></div>
       <p class="budget-hint">희망 조건에 ‘3000 초반’ 입력 시 최소 3,000만원·최대 3,300만원으로 자동 입력됩니다. 중반은 3,400~3,600만원, 후반은 3,700~3,900만원 기준입니다.</p>
     </div></section>
@@ -574,13 +643,21 @@ function openLeadForm(initialPhone="", existing=null) {
   document.body.classList.add("modal-open");
   dlg.showModal();
   dlg.querySelectorAll("[data-close-modal]").forEach(button => button.addEventListener("click", () => dlg.close()));
+  const phoneInput=dlg.querySelector('[name="phone"]');
+  phoneInput.addEventListener("input", () => {
+    phoneInput.value=formatPhoneInput(phoneInput.value);
+  });
+  dlg.querySelectorAll("[data-budget-input]").forEach(input => input.addEventListener("input", () => {
+    input.value=formatThousands(input.value);
+  }));
+  bindModelAutocomplete(dlg);
   requestAnimationFrame(() => dlg.querySelector('[name="phone"]')?.focus({ preventScroll:true }));
   const conditionInput=dlg.querySelector('[name="conditionRaw"]');
   conditionInput.addEventListener("input", () => {
     const inferred=budgetRangeFromCondition(conditionInput.value);
     if (inferred) {
-      dlg.querySelector('[name="budgetMin"]').value=inferred.min;
-      dlg.querySelector('[name="budgetMax"]').value=inferred.max;
+      dlg.querySelector('[name="budgetMin"]').value=formatThousands(inferred.min);
+      dlg.querySelector('[name="budgetMax"]').value=formatThousands(inferred.max);
     }
     if (conditionInput.value.includes("할부")) dlg.querySelector('[name="financeStatus"]').value="예";
   });
@@ -591,8 +668,8 @@ function openLeadForm(initialPhone="", existing=null) {
     if (!validPhone(phone)) { alert("연락처를 010-0000-0000 형식으로 입력해 주세요."); return; }
     const conditionRaw=String(f.get("conditionRaw")||"").trim();
     const inferredBudget=budgetRangeFromCondition(conditionRaw);
-    let budgetMin=inferredBudget?.min || Number(f.get("budgetMin")) || null;
-    let budgetMax=inferredBudget?.max || Number(f.get("budgetMax")) || null;
+    let budgetMin=inferredBudget?.min || parseFormattedNumber(f.get("budgetMin"));
+    let budgetMax=inferredBudget?.max || parseFormattedNumber(f.get("budgetMax"));
     if (budgetMin && budgetMax && budgetMin > budgetMax) { alert("최소 예산은 최대 예산보다 클 수 없습니다."); return; }
     const inquiryType=String(f.get("inquiryType")||"구매").trim();
     const financeStatus=conditionRaw.includes("할부") ? "예" : f.get("financeStatus");
