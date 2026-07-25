@@ -17,6 +17,12 @@ const topEntries = (obj, limit=8) => Object.entries(obj).sort((a,b) => b[1] - a[
 const phoneKey = (phone) => (phone || "").replace(/\D/g, "");
 const validPhone = (phone) => /^010\d{8}$/.test(phoneKey(phone));
 const normalizePhone = (phone) => validPhone(phone) ? `${phoneKey(phone).slice(0,3)}-${phoneKey(phone).slice(3,7)}-${phoneKey(phone).slice(7)}` : (phone || "").trim();
+const parseDate = (value) => /^\d{4}-\d{2}-\d{2}$/.test(value || "") ? new Date(`${value}T00:00:00+09:00`) : null;
+const dateKey = (date) => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul" }).format(date);
+const monthKey = (date) => dateKey(date).slice(0, 7);
+const monthLabel = (ym) => ym ? `${ym.slice(0,4)}년 ${ym.slice(5,7)}월` : "-";
+const addDays = (date, days) => { const next = new Date(date); next.setDate(next.getDate() + days); return next; };
+const addMonths = (date, months) => { const next = new Date(date); next.setMonth(next.getMonth() + months); return next; };
 const budgetLabel = (row) => {
   const min = row.budgetMin ? `${fmt(row.budgetMin)}만원` : "";
   const max = row.budgetMax ? `${fmt(row.budgetMax)}만원` : "";
@@ -106,7 +112,7 @@ function render() {
     return;
   }
   $$(".nav button").forEach(btn => btn.classList.toggle("active", btn.dataset.tab === activeTab));
-  $(".total-count").textContent = `${fmt(leads.length)}건`;
+  if ($(".total-count")) $(".total-count").textContent = `${fmt(leads.length)}건`;
   $(".page-title").textContent = activeTab === "overview" ? "고객 문의 현황" : activeTab === "customers" ? "전체 고객" : activeTab === "analysis" ? "고객 문의 분석" : "구글시트 연동";
   selectedCustomer = selectedCustomer && buildCustomers().find(c => c.id === selectedCustomer.id) || null;
   if (activeTab === "overview") renderOverview();
@@ -117,7 +123,7 @@ function render() {
 
 function renderLogin(message = "") {
   $(".page-title").textContent = "로그인";
-  $(".total-count").textContent = "보호됨";
+  if ($(".total-count")) $(".total-count").textContent = "보호됨";
   $$(".nav button").forEach(btn => btn.classList.remove("active"));
   const settings = getSettings();
   app.innerHTML = `
@@ -176,21 +182,36 @@ function renderOverview() {
   const byType = count(leads.map(r => r.inquiryType));
   const byModel = count(leads.flatMap(r => r.models || []));
   const byTopic = count(leads.flatMap(r => r.topics || []));
-  const repeated = Object.values(count(leads.filter(r => validPhone(r.phone)).map(r => normalizePhone(r.phone)))).filter(v => v > 1).length;
+  const latestDate = dated.map(r => parseDate(r.inquiryDate)).filter(Boolean).sort((a,b) => b - a)[0] || parseDate(today());
+  const latestKey = dateKey(latestDate);
+  const currentMonth = monthKey(latestDate);
+  const currentMonthRows = dated.filter(r => (r.inquiryDate || "").startsWith(currentMonth));
+  const previousMonthDate = addMonths(latestDate, -1);
+  const previousMonth = monthKey(previousMonthDate);
+  const previousMonthSamePeriodRows = dated.filter(r => {
+    if (!(r.inquiryDate || "").startsWith(previousMonth)) return false;
+    const day = Number(r.inquiryDate.slice(8,10));
+    return day <= Number(latestKey.slice(8,10));
+  });
+  const previousCount = previousMonthSamePeriodRows.length;
+  const growth = previousCount ? ((currentMonthRows.length - previousCount) / previousCount * 100).toFixed(1) : null;
+  const recentStartKey = dateKey(addDays(latestDate, -30));
+  const recent31Rows = dated.filter(r => r.inquiryDate >= recentStartKey && r.inquiryDate <= latestKey);
+  const recentByModel = count(recent31Rows.flatMap(r => r.models || []));
+  const recentTopModel = topEntries(recentByModel, 1)[0];
   app.innerHTML = `
     <section class="kpis">
-      ${kpi("전체 상담", `${fmt(leads.length)}건`, `기록일 ${fmt(dates.length)}일`)}
-      ${kpi("응대일 평균", `${(dated.length / Math.max(dates.length, 1)).toFixed(1)}건`, "날짜가 있는 상담 기준")}
-      ${kpi("인기 차종", topEntries(byModel,1)[0]?.[0] || "-", `${topEntries(byModel,1)[0]?.[1] || 0}건 문의`)}
-      ${kpi("반복 연락 고객", `${fmt(repeated)}명`, "전화번호 기준 상담 이력")}
+      ${kpi(`${monthLabel(currentMonth)} 상담수`, `${fmt(currentMonthRows.length)}건`, `${latestKey} 기준`)}
+      ${kpi("일평균 응대수", `${(dated.length / Math.max(dates.length, 1)).toFixed(1)}건`, `전체 DB ${fmt(dates.length)}일 기준`)}
+      ${kpi("최근 한달 인기 문의 차종", recentTopModel?.[0] || "-", `최근 31일 · ${recentTopModel?.[1] || 0}건`)}
+      ${kpi(`${monthLabel(currentMonth)} 동기간 증가율`, growth === null ? "신규" : `${growth}%`, `전월 동기간 ${fmt(previousCount)}건 대비`)}
     </section>
     <section class="grid">
       ${card("일별 문의 현황", "문의 날짜 기준 상담 건수", verticalBars(Object.entries(byDate).sort()), "wide")}
-      ${card("문의 종류", "구매·판매·할부 등", donut(topEntries(byType,7)))}
-      ${card("인기 차종", "복수 차종은 각각 집계", bars(topEntries(byModel,10)))}
+      ${card("문의 종류", "구매·판매·할부 등", donut(topEntries(byType,7)), "chart")}
+      ${card("주요 문의 내용", "희망조건 기반 태그", donut(topEntries(byTopic,8)), "chart")}
+      ${card("인기 차종 TOP 10", "전체 DB 기준 · 복수 차종은 각각 집계", rankedBars(topEntries(byModel,10)))}
       ${card("월별 문의 현황", "월별 총 상담량", verticalBars(Object.entries(byMonth).sort()), "wide")}
-      ${card("주요 문의 내용", "희망조건 기반 태그", topicCloud(topEntries(byTopic,12)))}
-      ${card("최근 상담", "최신 문의 10건", inquiryTable(leads.slice().sort((a,b)=>(b.inquiryDate||"").localeCompare(a.inquiryDate||"")).slice(0,10)), "wide")}
     </section>`;
 }
 
@@ -345,8 +366,9 @@ async function syncDelete(siteId) {
 function kpi(label, value, detail) { return `<article class="kpi"><span>${label}</span><strong>${value}</strong><small>${detail}</small></article>`; }
 function card(title, subtitle, body, cls="") { return `<article class="card ${cls}"><header><h2>${title}</h2><p>${subtitle}</p></header>${body}</article>`; }
 function bars(entries) { const max = Math.max(...entries.map(([,v]) => v), 1); return `<div class="bars">${entries.map(([k,v]) => `<div><span>${escapeHtml(k)}</span><b>${v}</b><i><em style="width:${v/max*100}%"></em></i></div>`).join("")}</div>`; }
+function rankedBars(entries) { const max = Math.max(...entries.map(([,v]) => v), 1); return `<div class="bars ranked">${entries.map(([k,v],i) => `<div><span><em>${i+1}</em>${escapeHtml(k)}</span><b>${v}</b><i><em style="width:${v/max*100}%"></em></i></div>`).join("")}</div>`; }
 function verticalBars(entries) { const max = Math.max(...entries.map(([,v]) => v), 1); return `<div class="vbars">${entries.map(([k,v]) => `<div><b>${v}</b><i style="height:${Math.max(v/max*100,3)}%"></i><span>${escapeHtml(String(k).slice(5).replace("-","/"))}</span></div>`).join("")}</div>`; }
-function donut(entries) { const total = entries.reduce((s,[,v])=>s+v,0); let p=0; const colors=["#2f6fed","#16a085","#f59e0b","#8b5cf6","#ef5da8","#64748b"]; const seg=entries.map(([,v],i)=>{const s=p; p+=total?v/total*100:0; return `${colors[i%colors.length]} ${s}% ${p}%`;}).join(","); return `<div class="donut-wrap"><div class="donut" style="background:conic-gradient(${seg || "#e2e8f0 0 100%"})"><strong>${total}</strong><span>건</span></div><div class="legend">${entries.map(([k,v],i)=>`<span><i style="background:${colors[i%colors.length]}"></i>${escapeHtml(k)}<b>${v}</b></span>`).join("")}</div></div>`; }
+function donut(entries) { const total = entries.reduce((s,[,v])=>s+v,0); let p=0; const colors=["#2f6fed","#16a085","#f59e0b","#8b5cf6","#ef5da8","#64748b","#0ea5e9","#f97316"]; const seg=entries.map(([,v],i)=>{const s=p; p+=total?v/total*100:0; return `${colors[i%colors.length]} ${s}% ${p}%`;}).join(","); return `<div class="donut-wrap"><div class="donut" style="background:conic-gradient(${seg || "#e2e8f0 0 100%"})"><div><strong>${fmt(total)}</strong><span>건</span></div></div><div class="legend">${entries.map(([k,v],i)=>`<span><i style="background:${colors[i%colors.length]}"></i>${escapeHtml(k)}<b>${fmt(v)}</b></span>`).join("")}</div></div>`; }
 function topicCloud(entries) { return `<div class="topics">${entries.map(([k,v]) => `<span>${escapeHtml(k)}<b>${v}</b></span>`).join("")}</div>`; }
 function inquiryTable(rows) { return `<div class="table"><table><thead><tr><th>문의일</th><th>전화번호</th><th>타입</th><th>문의 종류</th><th>차종</th><th>예산</th><th>할부</th><th>방문</th><th>담당자</th><th>희망 조건</th></tr></thead><tbody>${rows.map(r => `<tr><td>${r.inquiryDate||"-"}</td><td>${normalizePhone(r.phone||"")}</td><td>${r.inquiryChannel||"전화"}</td><td><span class="chip">${escapeHtml(r.inquiryType||"-")}</span></td><td><b>${escapeHtml((r.models||[]).join(", ")||"-")}</b></td><td>${escapeHtml(budgetLabel(r))}</td><td>${r.financeStatus||"미확인"}</td><td>${r.visitStatus||"미확인"}</td><td>${escapeHtml(r.staffName||"미입력")}</td><td>${escapeHtml(r.conditionRaw||"-")}</td></tr>`).join("")}</tbody></table></div>`; }
 function customerTable(customers) { return `<table class="customers"><thead><tr><th>연락처</th><th>최근 상담일</th><th>최초 문의일</th><th>희망 차종</th><th>문의 종류</th><th>최근 예산</th><th>방문</th><th>응대 직원</th><th>최근 희망 조건</th></tr></thead><tbody>${customers.map(c => `<tr data-customer="${c.id}"><td><button class="link">${c.phone}</button></td><td>${c.lastInquiryDate||"-"}</td><td>${c.firstInquiryDate||"-"}</td><td><b>${escapeHtml(c.models.join(", ")||"-")}</b></td><td>${c.inquiryTypes.map(t=>`<span class="chip">${escapeHtml(t)}</span>`).join("")}</td><td>${escapeHtml(c.budgetLabel)}</td><td>${c.visitStatus}</td><td>${escapeHtml(c.staffNames.join(", ")||"미입력")}</td><td>${escapeHtml(c.latestCondition||"-")}</td></tr>`).join("")}</tbody></table>`; }
