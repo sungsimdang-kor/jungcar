@@ -33,6 +33,25 @@ const budgetLabel = (row) => {
   if (min && max) return `${min}~${max}`;
   return min || max || row.budgetRaw || row.budgetBucket || "미기재";
 };
+const budgetRangeFromCondition = (value = "") => {
+  const text = String(value).replaceAll(",", "").replace(/\s+/g, " ");
+  let match = text.match(/(\d{3,5})\s*(?:만(?:원)?)?\s*(초반|중반|후반)/);
+  let base;
+  let band;
+  if (match) {
+    base = Math.floor(Number(match[1]) / 1000) * 1000;
+    band = match[2];
+  } else {
+    match = text.match(/(\d*)\s*천\s*(초반|중반|후반)/);
+    if (!match) return null;
+    base = Number(match[1] || 1) * 1000;
+    band = match[2];
+  }
+  if (!base) return null;
+  const offsets = { 초반:[0,300], 중반:[400,600], 후반:[700,900] };
+  return { min:base + offsets[band][0], max:base + offsets[band][1], band };
+};
+const includesAncillaryCost = (row) => (row.topics || []).includes("부대비용 포함");
 const topicsFromText = (conditionRaw = "", inquiryType = "", financeStatus = "") => {
   const raw = `${conditionRaw} ${inquiryType} ${financeStatus}`.toLowerCase();
   const rules = [
@@ -146,7 +165,6 @@ function renderLogin(message = "") {
     <section class="login-card">
       <div class="login-brand">
         <img class="login-logo" src="https://xn--tv-9z9j31p.com/assets/admin/images/logo/171/logo.png" alt="중카TV">
-        <span>SECURE JUNGCAR CRM</span>
         <h2>로그인</h2>
       </div>
       <form id="loginForm">
@@ -491,6 +509,7 @@ function customerDetail(c) {
       <div class="history-grid">
         ${detailItem("희망 차종", (r.models || []).join(", "))}
         ${detailItem("예산", budgetLabel(r))}
+        ${detailItem("부대비용 포함", includesAncillaryCost(r) ? "예" : "아니오")}
         ${detailItem("구매 예정일", r.purchaseTiming)}
         ${detailItem("할부 여부", r.financeStatus)}
         ${detailItem("방문 여부", r.visitStatus)}
@@ -536,6 +555,8 @@ function openLeadForm(initialPhone="", existing=null) {
       ${formField("구매 예정일", `<input name="purchaseTiming" value="${escapeHtml(r.purchaseTiming||"")}" placeholder="예: 즉시, 1개월 이내">`)}
       ${formField("최소 예산(만원)", `<input name="budgetMin" type="number" min="0" step="100" value="${r.budgetMin||""}" placeholder="예: 1000">`)}
       ${formField("최대 예산(만원)", `<input name="budgetMax" type="number" min="0" step="100" value="${r.budgetMax||""}" placeholder="예: 2000">`)}
+      <div class="checkbox-field"><span>예산 포함 범위</span><label class="inline-check"><input name="ancillaryIncluded" type="checkbox" ${includesAncillaryCost(r) ? "checked" : ""}> 부대비용 포함</label></div>
+      <p class="budget-hint">희망 조건에 ‘3000 초반’ 입력 시 최소 3,000만원·최대 3,300만원으로 자동 입력됩니다. 중반은 3,400~3,600만원, 후반은 3,700~3,900만원 기준입니다.</p>
     </div></section>
     <section class="form-section"><h3>상담 진행 정보</h3><div class="form-grid">
       ${formField("할부 여부", `<select name="financeStatus"><option ${selected(r.financeStatus||"미확인","미확인")}>미확인</option><option ${selected(r.financeStatus,"예")}>예</option><option ${selected(r.financeStatus,"아니오")}>아니오</option></select>`)}
@@ -551,19 +572,31 @@ function openLeadForm(initialPhone="", existing=null) {
   </form></dialog>`;
   document.body.insertAdjacentHTML("beforeend", html);
   const dlg=$("dialog.modal");
+  const conditionInput=dlg.querySelector('[name="conditionRaw"]');
+  conditionInput.addEventListener("input", () => {
+    const inferred=budgetRangeFromCondition(conditionInput.value);
+    if (inferred) {
+      dlg.querySelector('[name="budgetMin"]').value=inferred.min;
+      dlg.querySelector('[name="budgetMax"]').value=inferred.max;
+    }
+    if (conditionInput.value.includes("할부")) dlg.querySelector('[name="financeStatus"]').value="예";
+  });
   $("#saveLead").onclick=async(e)=>{
     e.preventDefault();
     const f=new FormData($("#leadForm"));
     const phone=normalizePhone(f.get("phone"));
     if (!validPhone(phone)) { alert("연락처를 010-0000-0000 형식으로 입력해 주세요."); return; }
-    const budgetMin=Number(f.get("budgetMin"))||null;
-    const budgetMax=Number(f.get("budgetMax"))||null;
-    if (budgetMin && budgetMax && budgetMin > budgetMax) { alert("최소 예산은 최대 예산보다 클 수 없습니다."); return; }
     const conditionRaw=String(f.get("conditionRaw")||"").trim();
+    const inferredBudget=budgetRangeFromCondition(conditionRaw);
+    let budgetMin=inferredBudget?.min || Number(f.get("budgetMin")) || null;
+    let budgetMax=inferredBudget?.max || Number(f.get("budgetMax")) || null;
+    if (budgetMin && budgetMax && budgetMin > budgetMax) { alert("최소 예산은 최대 예산보다 클 수 없습니다."); return; }
     const inquiryType=String(f.get("inquiryType")||"구매").trim();
-    const financeStatus=f.get("financeStatus");
-    const manualTopics=String(f.get("topics")||"").split(",").map(s=>s.trim()).filter(Boolean);
-    const row={...r,id:r.id||`local-${Date.now()}`,source:"manual",inquiryDate:f.get("inquiryDate"),phone,inquiryChannel:f.get("inquiryChannel"),inquiryType,models:[f.get("model1"),f.get("model2"),f.get("model3")].map(s=>String(s||"").trim()).filter(Boolean),budgetMin,budgetMax,budgetRaw:[budgetMin,budgetMax].filter(Boolean).join("~"),budgetBucket:"표현형",purchaseTiming:String(f.get("purchaseTiming")||"").trim(),financeStatus,visitStatus:f.get("visitStatus"),staffName:String(f.get("staffName")||"").trim(),leadSource:String(f.get("leadSource")||"대표번호").trim(),callOutcome:String(f.get("callOutcome")||"상담완료").trim(),followUpDate:f.get("followUpDate"),conditionRaw,topics:uniq([...manualTopics,...topicsFromText(conditionRaw,inquiryType,financeStatus)])};
+    const financeStatus=conditionRaw.includes("할부") ? "예" : f.get("financeStatus");
+    const ancillaryIncluded=f.get("ancillaryIncluded")==="on";
+    const manualTopics=String(f.get("topics")||"").split(",").map(s=>s.trim()).filter(t=>t && t!=="부대비용 포함");
+    const topics=uniq([...manualTopics,...topicsFromText(conditionRaw,inquiryType,financeStatus),...(ancillaryIncluded?["부대비용 포함"]:[])]);
+    const row={...r,id:r.id||`local-${Date.now()}`,source:"manual",inquiryDate:f.get("inquiryDate"),phone,inquiryChannel:f.get("inquiryChannel"),inquiryType,models:[f.get("model1"),f.get("model2"),f.get("model3")].map(s=>String(s||"").trim()).filter(Boolean),budgetMin,budgetMax,budgetRaw:[budgetMin,budgetMax].filter(Boolean).join("~"),budgetBucket:"표현형",purchaseTiming:String(f.get("purchaseTiming")||"").trim(),financeStatus,visitStatus:f.get("visitStatus"),staffName:String(f.get("staffName")||"").trim(),leadSource:String(f.get("leadSource")||"대표번호").trim(),callOutcome:String(f.get("callOutcome")||"상담완료").trim(),followUpDate:f.get("followUpDate"),conditionRaw,topics};
     if(existing) leads=leads.map(x=>x.id===row.id?row:x); else leads=[row,...leads];
     await syncUpsert(row);
     dlg.remove();
@@ -573,7 +606,7 @@ function openLeadForm(initialPhone="", existing=null) {
   };
   dlg.addEventListener("close",()=>dlg.remove());
 }
-function exportCsv() { const csv=["문의 날짜,연락처,문의 타입,문의 종류,희망 차량 1,희망 차량 2,희망 차량 3,최소 예산,최대 예산,구매 예정일,할부 여부,방문 여부,담당자,문의 주제,유입 경로,상담 결과,후속 연락일,희망 조건",...leads.map(r=>[r.inquiryDate,r.phone,r.inquiryChannel,r.inquiryType,...[0,1,2].map(i=>(r.models||[])[i]||""),r.budgetMin,r.budgetMax,r.purchaseTiming,r.financeStatus,r.visitStatus,r.staffName,(r.topics||[]).join(", "),r.leadSource,r.callOutcome,r.followUpDate,r.conditionRaw].map(v=>`"${String(v||"").replaceAll('"','""')}"`).join(","))].join("\n"); const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob(["\ufeff",csv],{type:"text/csv;charset=utf-8"})); a.download=`jungcar-db-${today()}.csv`; a.click(); URL.revokeObjectURL(a.href); }
+function exportCsv() { const csv=["문의 날짜,연락처,문의 타입,문의 종류,희망 차량 1,희망 차량 2,희망 차량 3,최소 예산,최대 예산,부대비용 포함,구매 예정일,할부 여부,방문 여부,담당자,문의 주제,유입 경로,상담 결과,후속 연락일,희망 조건",...leads.map(r=>[r.inquiryDate,r.phone,r.inquiryChannel,r.inquiryType,...[0,1,2].map(i=>(r.models||[])[i]||""),r.budgetMin,r.budgetMax,includesAncillaryCost(r)?"예":"아니오",r.purchaseTiming,r.financeStatus,r.visitStatus,r.staffName,(r.topics||[]).join(", "),r.leadSource,r.callOutcome,r.followUpDate,r.conditionRaw].map(v=>`"${String(v||"").replaceAll('"','""')}"`).join(","))].join("\n"); const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob(["\ufeff",csv],{type:"text/csv;charset=utf-8"})); a.download=`jungcar-db-${today()}.csv`; a.click(); URL.revokeObjectURL(a.href); }
 function escapeHtml(v) { return String(v ?? "").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c])); }
 $$("[data-tab]").forEach(btn => btn.onclick = () => { activeTab = btn.dataset.tab; selectedCustomer = null; render(); });
 loadData();
