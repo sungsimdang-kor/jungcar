@@ -102,6 +102,13 @@ button { cursor:pointer; }
 .card.chart,.overview-card { min-height:350px; }
 .card header h2 { margin:0 0 4px;color:var(--navy);font-size:18px; }
 .card header p { margin:0 0 16px;color:var(--muted);font-size:12px; }
+.overview-combined-card,.overview-ranked-card { min-height:680px; }
+.overview-combined { display:grid; }
+.overview-finance-block { border-top:1px solid var(--line);margin-top:24px;padding-top:24px; }
+.overview-finance-block>header h3 { color:var(--navy);font-size:18px;margin:0 0 4px; }
+.overview-finance-block>header p { color:var(--muted);font-size:12px;margin:0 0 14px; }
+.overview-ranked-card { display:flex;flex-direction:column; }
+.overview-ranked-card .ranked-counts { flex:1;grid-template-rows:repeat(10,minmax(46px,1fr)); }
 
 .bars { display:grid;gap:12px; }
 .bars>div { display:grid;gap:5px; }
@@ -510,6 +517,7 @@ textarea { resize:vertical; }
   .toolbar { grid-template-columns:1fr; }
   .top { align-items:flex-start; }
   .card.chart,.overview-card { min-height:0; }
+  .overview-combined-card,.overview-ranked-card { min-height:0; }
   .donut-wrap,.donut-wrap.chart-right { grid-template-columns:1fr; }
   .finance-summary { grid-template-columns:1fr; }
   .donut-wrap.chart-right .legend { order:2; }
