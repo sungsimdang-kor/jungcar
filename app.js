@@ -280,9 +280,8 @@ function renderOverview() {
     </section>
     <section class="grid">
       ${card("일별 문의 현황", "문의 날짜 기준 상담 건수", verticalBars(Object.entries(byDate).sort()), "wide")}
-      ${card("문의 종류", "구매·판매·할부 등", donut(topEntries(byType,7), true), "chart overview-card")}
-      ${card("인기 차종 TOP 10", "전체 DB 기준 · 복수 차종은 각각 집계", rankedCounts(topEntries(byModel,10)), "chart overview-card")}
-      ${card("전체 DB 할부 문의 비율", `전체 상담 ${fmt(leads.length)}건 기준`, financeSummary(financeCount, leads.length, financeRatio), "chart overview-card")}
+      ${card("문의 종류", "구매·판매·할부 등", overviewInquiryFinance(topEntries(byType,7), financeCount, leads.length, financeRatio), "chart overview-card overview-combined-card")}
+      ${card("인기 차종 TOP 10", "전체 DB 기준 · 복수 차종은 각각 집계", rankedCounts(topEntries(byModel,10)), "chart overview-card overview-ranked-card")}
       ${card("고객 희망 예산 금액대", `전체 DB 기준 · 예산 입력 ${fmt(budgetEntries.reduce((sum,[,value]) => sum + value, 0))}건`, budgetBars(budgetEntries), "wide budget-overview")}
     </section>`;
 }
@@ -326,12 +325,9 @@ function renderAnalysis() {
         <label>시작일<input name="dateFrom" type="date" value="${escapeHtml(analysisFilters.dateFrom || "")}"></label>
         <label>종료일<input name="dateTo" type="date" value="${escapeHtml(analysisFilters.dateTo || "")}"></label>
         ${option("문의 종류", "inquiryType", leads.map(r => r.inquiryType))}
-        ${option("문의 채널", "inquiryChannel", leads.map(r => r.inquiryChannel))}
         ${option("희망 차종", "model", leads.flatMap(r => r.models || []))}
         ${option("할부 여부", "financeStatus", leads.map(r => r.financeStatus || "미확인"))}
         ${option("방문 여부", "visitStatus", leads.map(r => r.visitStatus || "미확인"))}
-        ${option("유입 경로", "leadSource", leads.map(r => r.leadSource || "미입력"))}
-        ${option("상담 결과", "callOutcome", leads.map(r => r.callOutcome || "미입력"))}
         <label>최소 예산(만원)<input name="budgetMin" type="number" min="0" step="100" value="${escapeHtml(analysisFilters.budgetMin || "")}" placeholder="예: 1000"></label>
         <label>최대 예산(만원)<input name="budgetMax" type="number" min="0" step="100" value="${escapeHtml(analysisFilters.budgetMax || "")}" placeholder="예: 3000"></label>
       </form>
@@ -350,20 +346,17 @@ function filteredAnalysisRows() {
   const term = String(f.search || "").trim().toLowerCase();
   return leads.filter(r => {
     const searchable = [
-      r.inquiryDate, r.phone, r.inquiryChannel, r.inquiryType, ...(r.models || []),
+      r.inquiryDate, r.phone, r.inquiryType, ...(r.models || []),
       r.budgetMin, r.budgetMax, r.purchaseTiming, r.financeStatus, r.visitStatus,
-      ...(r.topics || []), r.leadSource, r.callOutcome, r.followUpDate, r.conditionRaw,
+      ...(r.topics || []), r.followUpDate, r.conditionRaw,
     ].join(" ").toLowerCase();
     if (term && !searchable.includes(term)) return false;
     if (f.dateFrom && (r.inquiryDate || "") < f.dateFrom) return false;
     if (f.dateTo && (r.inquiryDate || "") > f.dateTo) return false;
     if (f.inquiryType && r.inquiryType !== f.inquiryType) return false;
-    if (f.inquiryChannel && r.inquiryChannel !== f.inquiryChannel) return false;
     if (f.model && !(r.models || []).includes(f.model)) return false;
     if (f.financeStatus && (r.financeStatus || "미확인") !== f.financeStatus) return false;
     if (f.visitStatus && (r.visitStatus || "미확인") !== f.visitStatus) return false;
-    if (f.leadSource && (r.leadSource || "미입력") !== f.leadSource) return false;
-    if (f.callOutcome && (r.callOutcome || "미입력") !== f.callOutcome) return false;
     if (f.budgetMin && Number(r.budgetMax || r.budgetMin || 0) < Number(f.budgetMin)) return false;
     if (f.budgetMax && Number(r.budgetMin || r.budgetMax || Infinity) > Number(f.budgetMax)) return false;
     return true;
@@ -377,11 +370,8 @@ function renderAnalysisResults() {
   const byType = count(rows.map(r => r.inquiryType));
   const byModel = count(rows.flatMap(r => r.models || []));
   const byBudget = count(rows.map(budgetBand));
-  const byChannel = count(rows.map(r => r.inquiryChannel || "미입력"));
   const byFinance = count(rows.map(r => r.financeStatus || "미확인"));
   const byVisit = count(rows.map(r => r.visitStatus || "미확인"));
-  const bySource = count(rows.map(r => r.leadSource || "미입력"));
-  const byOutcome = count(rows.map(r => r.callOutcome || "미입력"));
   const byTiming = count(rows.map(r => r.purchaseTiming || "미입력"));
   const byTopic = count(rows.flatMap(r => r.topics?.length ? r.topics : ["미입력"]));
   const byWeekday = count(dated.map(r => weekdayLabels[parseDate(r.inquiryDate).getDay()]));
@@ -401,12 +391,9 @@ function renderAnalysisResults() {
       ${card("문의 종류", "상담 목적 분포", donut(topEntries(byType,10), true), "chart")}
       ${card("희망 차종", "복수 차종 각각 집계", bars(topEntries(byModel,12)))}
       ${card("예산 분포", "최대 예산 기준", bars(Object.entries(byBudget)))}
-      ${card("문의 채널", "전화·문자 등", donut(topEntries(byChannel,8), true), "chart")}
       ${card("할부 여부", "할부 문의 현황", bars(topEntries(byFinance,8)))}
       ${card("방문 여부", "방문·예약 현황", bars(topEntries(byVisit,8)))}
       ${card("구매 예정일", "구매 시점 분포", bars(topEntries(byTiming,10)))}
-      ${card("유입 경로", "대표번호·광고 등", bars(topEntries(bySource,10)))}
-      ${card("상담 결과", "상담 상태 분포", bars(topEntries(byOutcome,10)))}
       ${card("문의 주제", "입력된 문의 주제 태그", bars(topEntries(byTopic,12)), "wide")}
     </section>`;
 }
@@ -541,6 +528,15 @@ function financeSummary(financeCount, total, ratio) {
     </div>
   </div>`;
 }
+function overviewInquiryFinance(typeEntries, financeCount, total, ratio) {
+  return `<div class="overview-combined">
+    ${donut(typeEntries, true)}
+    <section class="overview-finance-block">
+      <header><h3>전체 DB 할부 문의 비율</h3><p>전체 상담 ${fmt(total)}건 기준</p></header>
+      ${financeSummary(financeCount, total, ratio)}
+    </section>
+  </div>`;
+}
 function budgetBars(entries) {
   const max = Math.max(...entries.map(([,value]) => value), 1);
   return `<div class="budget-bars">${entries.map(([label,value]) => `<div>
@@ -550,7 +546,7 @@ function budgetBars(entries) {
   </div>`).join("")}</div>`;
 }
 function topicCloud(entries) { return `<div class="topics">${entries.map(([k,v]) => `<span>${escapeHtml(k)}<b>${v}</b></span>`).join("")}</div>`; }
-function inquiryTable(rows) { return `<div class="table"><table><thead><tr><th>문의일</th><th>전화번호</th><th>타입</th><th>문의 종류</th><th>차종</th><th>예산</th><th>할부</th><th>방문</th><th>희망 조건</th></tr></thead><tbody>${rows.map(r => `<tr><td>${r.inquiryDate||"-"}</td><td>${normalizePhone(r.phone||"")}</td><td>${r.inquiryChannel||"전화"}</td><td><span class="chip">${escapeHtml(r.inquiryType||"-")}</span></td><td><b>${escapeHtml((r.models||[]).join(", ")||"-")}</b></td><td>${escapeHtml(budgetLabel(r))}</td><td>${r.financeStatus||"미확인"}</td><td>${r.visitStatus||"미확인"}</td><td>${escapeHtml(r.conditionRaw||"-")}</td></tr>`).join("")}</tbody></table></div>`; }
+function inquiryTable(rows) { return `<div class="table"><table><thead><tr><th>문의일</th><th>전화번호</th><th>문의 종류</th><th>차종</th><th>예산</th><th>할부</th><th>방문</th><th>희망 조건</th></tr></thead><tbody>${rows.map(r => `<tr><td>${r.inquiryDate||"-"}</td><td>${normalizePhone(r.phone||"")}</td><td><span class="chip">${escapeHtml(r.inquiryType||"-")}</span></td><td><b>${escapeHtml((r.models||[]).join(", ")||"-")}</b></td><td>${escapeHtml(budgetLabel(r))}</td><td>${r.financeStatus||"미확인"}</td><td>${r.visitStatus||"미확인"}</td><td>${escapeHtml(r.conditionRaw||"-")}</td></tr>`).join("")}</tbody></table></div>`; }
 function customerTable(customers) { return `<table class="customers"><thead><tr><th>연락처</th><th>최근 상담일</th><th>최초 문의일</th><th>희망 차종</th><th>문의 종류</th><th>최근 예산</th><th>방문</th><th>최근 희망 조건</th></tr></thead><tbody>${customers.map(c => `<tr data-customer="${c.id}"><td><button class="link">${c.phone}</button></td><td>${c.lastInquiryDate||"-"}</td><td>${c.firstInquiryDate||"-"}</td><td><b>${escapeHtml(c.models.join(", ")||"-")}</b></td><td>${c.inquiryTypes.map(t=>`<span class="chip">${escapeHtml(t)}</span>`).join("")}</td><td>${escapeHtml(c.budgetLabel)}</td><td>${c.visitStatus}</td><td>${escapeHtml(c.latestCondition||"-")}</td></tr>`).join("")}</tbody></table>`; }
 function bindCustomerRows() { $$("#customerTable tr[data-customer]").forEach(tr => tr.onclick = () => { selectedCustomer = buildCustomers().find(c => c.id === tr.dataset.customer); renderCustomers(); }); }
 function detailItem(label, value) { return `<div><span>${label}</span><b>${escapeHtml(value || "미입력")}</b></div>`; }
@@ -568,7 +564,7 @@ function customerDetail(c) {
     </section>
     <div class="section-title"><div><h3>날짜별 상담 내역</h3><p>상담 한 건마다 모든 입력 정보가 구글시트의 한 행으로 저장됩니다.</p></div><b>${fmt(c.inquiries.length)}건</b></div>
     <div class="history">${c.inquiries.map(r => `<article>
-      <header><div><strong>${r.inquiryDate || "날짜 없음"}</strong><span class="chip">${escapeHtml(r.inquiryChannel || "전화")}</span><span class="chip">${escapeHtml(r.inquiryType || "-")}</span></div><div class="history-actions"><button data-edit="${r.id}">수정</button><button class="danger" data-del="${r.id}">삭제</button></div></header>
+      <header><div><strong>${r.inquiryDate || "날짜 없음"}</strong><span class="chip">${escapeHtml(r.inquiryType || "-")}</span></div><div class="history-actions"><button data-edit="${r.id}">수정</button><button class="danger" data-del="${r.id}">삭제</button></div></header>
       <div class="history-grid">
         ${detailItem("희망 차종", (r.models || []).join(", "))}
         ${detailItem("예산", budgetLabel(r))}
@@ -576,8 +572,6 @@ function customerDetail(c) {
         ${detailItem("구매 예정일", r.purchaseTiming)}
         ${detailItem("할부 여부", r.financeStatus)}
         ${detailItem("방문 여부", r.visitStatus)}
-        ${detailItem("유입 경로", r.leadSource)}
-        ${detailItem("상담 결과", r.callOutcome)}
         ${detailItem("후속 연락일", r.followUpDate)}
         ${detailItem("문의 주제", (r.topics || []).join(", "))}
       </div>
@@ -653,7 +647,6 @@ function openLeadForm(initialPhone="", existing=null) {
     <section class="form-section"><h3>기본 정보</h3><div class="form-grid">
       ${formField("문의 날짜", `<input name="inquiryDate" type="date" value="${r.inquiryDate||today()}" required>`)}
       ${formField("연락처", `<input name="phone" inputmode="numeric" autocomplete="tel" maxlength="13" placeholder="010-0000-0000" value="${escapeHtml(formatPhoneInput(initialPhone||r.phone||""))}" required>`)}
-      ${formField("문의 채널", `<select name="inquiryChannel"><option ${selected(r.inquiryChannel||"전화","전화")}>전화</option><option ${selected(r.inquiryChannel,"문자")}>문자</option></select>`)}
       ${formField("문의 종류", `<input name="inquiryType" list="inquiryTypes" value="${escapeHtml(r.inquiryType||"구매")}" required><datalist id="inquiryTypes"><option value="구매"><option value="판매"><option value="판매 후 구매"><option value="할부/한도"><option value="방문 일정"><option value="수리/보증"><option value="기타/문의"></datalist>`)}
     </div></section>
     <section class="form-section"><h3>희망 차량과 예산</h3><div class="form-grid">
@@ -669,8 +662,6 @@ function openLeadForm(initialPhone="", existing=null) {
     <section class="form-section"><h3>상담 진행 정보</h3><div class="form-grid">
       ${formField("할부 여부", `<select name="financeStatus"><option ${selected(r.financeStatus||"미확인","미확인")}>미확인</option><option ${selected(r.financeStatus,"예")}>예</option><option ${selected(r.financeStatus,"아니오")}>아니오</option></select>`)}
       ${formField("방문 여부", `<select name="visitStatus"><option ${selected(r.visitStatus||"미확인","미확인")}>미확인</option><option ${selected(r.visitStatus,"예")}>예</option><option ${selected(r.visitStatus,"아니오")}>아니오</option></select>`)}
-      ${formField("유입 경로", `<input name="leadSource" value="${escapeHtml(r.leadSource||"대표번호")}" placeholder="대표번호, 광고 등">`)}
-      ${formField("상담 결과", `<input name="callOutcome" value="${escapeHtml(r.callOutcome||"상담완료")}" placeholder="상담완료, 보류 등">`)}
       ${formField("후속 연락일", `<input name="followUpDate" type="date" value="${escapeHtml(r.followUpDate||"")}">`)}
       ${formField("문의 주제", `<input name="topics" value="${escapeHtml((r.topics||[]).join(", "))}" placeholder="가격, 옵션, 방문 등 쉼표로 구분">`, "full")}
       ${formField("희망 조건·상담 메모", `<textarea name="conditionRaw" rows="4" placeholder="핵심 조건을 간략히 입력">${escapeHtml(r.conditionRaw||"")}</textarea>`, "full")}
@@ -719,7 +710,7 @@ function openLeadForm(initialPhone="", existing=null) {
     const ancillaryIncluded=f.get("ancillaryIncluded")==="on";
     const manualTopics=String(f.get("topics")||"").split(",").map(s=>s.trim()).filter(t=>t && t!=="부대비용 포함");
     const topics=uniq([...manualTopics,...topicsFromText(conditionRaw,inquiryType,financeStatus),...(ancillaryIncluded?["부대비용 포함"]:[])]);
-    const row={...r,id:r.id||`local-${Date.now()}`,source:"manual",inquiryDate:f.get("inquiryDate"),phone,inquiryChannel:f.get("inquiryChannel"),inquiryType,models:[f.get("model1"),f.get("model2"),f.get("model3")].map(s=>String(s||"").trim()).filter(Boolean),budgetMin,budgetMax,budgetRaw:[budgetMin,budgetMax].filter(Boolean).join("~"),budgetBucket:"표현형",purchaseTiming:String(f.get("purchaseTiming")||"").trim(),financeStatus,visitStatus:f.get("visitStatus"),staffName:r.staffName||"",leadSource:String(f.get("leadSource")||"대표번호").trim(),callOutcome:String(f.get("callOutcome")||"상담완료").trim(),followUpDate:f.get("followUpDate"),conditionRaw,topics};
+    const row={...r,id:r.id||`local-${Date.now()}`,source:"manual",inquiryDate:f.get("inquiryDate"),phone,inquiryChannel:r.inquiryChannel||"",inquiryType,models:[f.get("model1"),f.get("model2"),f.get("model3")].map(s=>String(s||"").trim()).filter(Boolean),budgetMin,budgetMax,budgetRaw:[budgetMin,budgetMax].filter(Boolean).join("~"),budgetBucket:"표현형",purchaseTiming:String(f.get("purchaseTiming")||"").trim(),financeStatus,visitStatus:f.get("visitStatus"),staffName:r.staffName||"",leadSource:r.leadSource||"",callOutcome:r.callOutcome||"",followUpDate:f.get("followUpDate"),conditionRaw,topics};
     if(existing) leads=leads.map(x=>x.id===row.id?row:x); else leads=[row,...leads];
     await syncUpsert(row);
     dlg.close();
@@ -732,7 +723,7 @@ function openLeadForm(initialPhone="", existing=null) {
     dlg.remove();
   }, { once:true });
 }
-function exportCsv() { const csv=["문의 날짜,연락처,문의 타입,문의 종류,희망 차량 1,희망 차량 2,희망 차량 3,최소 예산,최대 예산,부대비용 포함,구매 예정일,할부 여부,방문 여부,문의 주제,유입 경로,상담 결과,후속 연락일,희망 조건",...leads.map(r=>[r.inquiryDate,r.phone,r.inquiryChannel,r.inquiryType,...[0,1,2].map(i=>(r.models||[])[i]||""),r.budgetMin,r.budgetMax,includesAncillaryCost(r)?"예":"아니오",r.purchaseTiming,r.financeStatus,r.visitStatus,(r.topics||[]).join(", "),r.leadSource,r.callOutcome,r.followUpDate,r.conditionRaw].map(v=>`"${String(v||"").replaceAll('"','""')}"`).join(","))].join("\n"); const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob(["\ufeff",csv],{type:"text/csv;charset=utf-8"})); a.download=`jungcar-db-${today()}.csv`; a.click(); URL.revokeObjectURL(a.href); }
+function exportCsv() { const csv=["문의 날짜,연락처,문의 종류,희망 차량 1,희망 차량 2,희망 차량 3,최소 예산,최대 예산,부대비용 포함,구매 예정일,할부 여부,방문 여부,문의 주제,후속 연락일,희망 조건",...leads.map(r=>[r.inquiryDate,r.phone,r.inquiryType,...[0,1,2].map(i=>(r.models||[])[i]||""),r.budgetMin,r.budgetMax,includesAncillaryCost(r)?"예":"아니오",r.purchaseTiming,r.financeStatus,r.visitStatus,(r.topics||[]).join(", "),r.followUpDate,r.conditionRaw].map(v=>`"${String(v||"").replaceAll('"','""')}"`).join(","))].join("\n"); const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob(["\ufeff",csv],{type:"text/csv;charset=utf-8"})); a.download=`jungcar-db-${today()}.csv`; a.click(); URL.revokeObjectURL(a.href); }
 function escapeHtml(v) { return String(v ?? "").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c])); }
 $$("[data-tab]").forEach(btn => btn.onclick = () => { activeTab = btn.dataset.tab; selectedCustomer = null; render(); });
 loadData();
