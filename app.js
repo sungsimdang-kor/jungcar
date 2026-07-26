@@ -1,6 +1,8 @@
 
 const SHEET_HEADERS = ["사이트ID","문의 날짜","연락처","문의 타입","문의 종류","희망 차량_1","희망 차량_2","희망 차량_3","최소 예산","최대 예산","구매 예정일","할부 여부","방문 여부","담당자","문의 주제","유입 경로","상담 결과","후속 연락일","희망 조건","수정일시"];
 const FIXED_APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzLkvPc0LutnFOszyKJd0VYlaU13IAz21PBbWISynrKO7UGfbcY5bp4ClU5lphabAx4/exec";
+const ADDITIONAL_APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwzmFAtSNUX9CB7BKELlcM95M76CuojmA8szFAlf9umhv1POGW1VC4QcA6ztltByEBy/exec";
+const LOGIN_ENDPOINTS = [FIXED_APPS_SCRIPT_URL, ADDITIONAL_APPS_SCRIPT_URL];
 const SETTINGS_KEY = "jungcar-sheet-sync";
 const SESSION_KEY = "jungcar-session";
 let leads = [];
@@ -89,7 +91,7 @@ const topicsFromText = (conditionRaw = "", inquiryType = "", financeStatus = "")
   ];
   return rules.filter(([, words]) => words.some(word => raw.includes(word.toLowerCase()))).map(([label]) => label);
 };
-const getSettings = () => ({ autoPush: true, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}"), endpoint: FIXED_APPS_SCRIPT_URL });
+const getSettings = () => ({ autoPush: true, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}"), endpoint: session?.endpoint || FIXED_APPS_SCRIPT_URL });
 const saveSettings = (settings) => localStorage.setItem(SETTINGS_KEY, JSON.stringify({ endpoint: FIXED_APPS_SCRIPT_URL, autoPush: settings.autoPush !== false }));
 const isLoggedIn = () => Boolean(session?.sessionToken && getSettings().endpoint);
 
@@ -205,21 +207,27 @@ function renderLogin(message = "") {
 async function login(event) {
   event.preventDefault();
   const form = new FormData(event.currentTarget);
-  try {
-    const result = await sheetJsonp("login", {
-      username: String(form.get("username") || ""),
-      password: String(form.get("password") || ""),
-    });
-    session = { sessionToken: result.sessionToken, loggedInAt: Date.now() };
-    localStorage.setItem(SESSION_KEY, JSON.stringify(session));
-    leads = await sheetList(false);
-    activeTab = "overview";
-    render();
-  } catch (err) {
-    session = null;
-    localStorage.removeItem(SESSION_KEY);
-    renderLogin(err.message || "로그인하지 못했습니다.");
+  const credentials = {
+    username: String(form.get("username") || ""),
+    password: String(form.get("password") || ""),
+  };
+  let lastError;
+  for (const endpoint of LOGIN_ENDPOINTS) {
+    try {
+      const result = await sheetJsonp("login", { ...credentials, endpoint });
+      session = { sessionToken: result.sessionToken, endpoint, loggedInAt: Date.now() };
+      localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+      leads = await sheetList(false);
+      activeTab = "overview";
+      render();
+      return;
+    } catch (err) {
+      lastError = err;
+    }
   }
+  session = null;
+  localStorage.removeItem(SESSION_KEY);
+  renderLogin(lastError?.message || "로그인하지 못했습니다.");
 }
 
 function logout() {
@@ -252,6 +260,11 @@ function renderOverview() {
   const recent31Rows = dated.filter(r => r.inquiryDate >= recentStartKey && r.inquiryDate <= latestKey);
   const recentByModel = count(recent31Rows.flatMap(r => r.models || []));
   const recentTopModel = topEntries(recentByModel, 1)[0];
+  const financeCount = currentMonthRows.filter(r => r.financeStatus === "예").length;
+  const financeRatio = currentMonthRows.length ? financeCount / currentMonthRows.length * 100 : 0;
+  const currentMonthStaff = count(currentMonthRows.filter(r => r.staffName).map(r => r.staffName));
+  const byBudget = count(leads.filter(r => r.budgetMin || r.budgetMax).map(budgetBand));
+  const budgetEntries = orderedBudgetEntries(byBudget);
   app.innerHTML = `
     <section class="kpis">
       ${kpi(`${monthLabel(currentMonth)} 상담수`, `${fmt(currentMonthRows.length)}건`, `${latestKey} 기준`)}
@@ -261,6 +274,9 @@ function renderOverview() {
     </section>
     <section class="grid">
       ${card("일별 문의 현황", "문의 날짜 기준 상담 건수", verticalBars(Object.entries(byDate).sort()), "wide")}
+      ${card(`${monthLabel(currentMonth)} 할부 문의 비율`, `이번달 전체 상담 ${fmt(currentMonthRows.length)}건 기준`, financeSummary(financeCount, currentMonthRows.length, financeRatio), "chart overview-card")}
+      ${card("담당자별 처리 건수", `${monthLabel(currentMonth)} · 담당자 입력 건만 집계`, donut(topEntries(currentMonthStaff,12), true), "chart overview-card")}
+      ${card("고객 희망 예산 금액대", `전체 DB 기준 · 예산 입력 ${fmt(budgetEntries.reduce((sum,[,value]) => sum + value, 0))}건`, budgetBars(budgetEntries), "wide budget-overview")}
       ${card("문의 종류", "구매·판매·할부 등", donut(topEntries(byType,7), true), "chart overview-card")}
       ${card("인기 차종 TOP 10", "전체 DB 기준 · 복수 차종은 각각 집계", rankedCounts(topEntries(byModel,10)), "chart overview-card")}
     </section>`;
@@ -426,11 +442,12 @@ function saveSyncForm() {
 
 function sheetJsonp(action, payload = {}) {
   const settings = getSettings();
-  if (!settings.endpoint) return Promise.reject(new Error("Apps Script URL을 먼저 입력하세요."));
+  const endpoint = payload.endpoint || settings.endpoint;
+  if (!endpoint) return Promise.reject(new Error("Apps Script URL을 먼저 입력하세요."));
   if (action !== "login" && !session?.sessionToken) return Promise.reject(new Error("로그인 후 이용하세요."));
   return new Promise((resolve, reject) => {
     const callback = `jungcar_cb_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-    const url = new URL(settings.endpoint);
+    const url = new URL(endpoint);
     url.searchParams.set("action", action);
     url.searchParams.set("callback", callback);
     if (action === "login") {
@@ -508,6 +525,29 @@ function rankedCounts(entries) { return `<div class="ranked-counts">${entries.ma
 function verticalBars(entries) { const max = Math.max(...entries.map(([,v]) => v), 1); return `<div class="vbars">${entries.map(([k,v]) => `<div><b>${v}</b><i style="height:${Math.max(v/max*100,3)}%"></i><span>${escapeHtml(String(k).slice(5).replace("-","/"))}</span></div>`).join("")}</div>`; }
 function donut(entries, chartRight=false) { const total = entries.reduce((s,[,v])=>s+v,0); let p=0; const colors=["#2f6fed","#16a085","#f59e0b","#8b5cf6","#ef5da8","#64748b","#0ea5e9","#f97316","#14b8a6","#eab308"]; const seg=entries.map(([,v],i)=>{const s=p; p+=total?v/total*100:0; return `${colors[i%colors.length]} ${s}% ${p}%`;}).join(","); const chart=`<div class="donut" style="background:conic-gradient(${seg || "#e2e8f0 0 100%"})"><div><strong>${fmt(total)}</strong><span>건</span></div></div>`; const legend=`<div class="legend">${entries.map(([k,v],i)=>`<span><i style="background:${colors[i%colors.length]}"></i>${escapeHtml(k)}<b>${fmt(v)}</b></span>`).join("")}</div>`; return `<div class="donut-wrap ${chartRight ? "chart-right" : ""}">${chartRight ? legend + chart : chart + legend}</div>`; }
 function budgetBand(row) { const value = Number(row.budgetMax || row.budgetMin || 0); if (!value) return "미입력"; if (value < 1000) return "1천만원 미만"; if (value < 2000) return "1천~2천만원"; if (value < 3000) return "2천~3천만원"; if (value < 4000) return "3천~4천만원"; if (value < 5000) return "4천~5천만원"; return "5천만원 이상"; }
+function orderedBudgetEntries(byBudget) {
+  return ["1천만원 미만","1천~2천만원","2천~3천만원","3천~4천만원","4천~5천만원","5천만원 이상"]
+    .map(label => [label, byBudget[label] || 0]);
+}
+function financeSummary(financeCount, total, ratio) {
+  const nonFinanceCount = Math.max(total - financeCount, 0);
+  return `<div class="finance-summary">
+    <div class="finance-rate"><strong>${ratio.toFixed(1)}<small>%</small></strong><span>할부 문의</span></div>
+    <div class="finance-table" role="table" aria-label="이번달 할부 문의 비율">
+      <div role="row"><span role="cell">할부 문의</span><b role="cell">${fmt(financeCount)}건</b></div>
+      <div role="row"><span role="cell">그 외 상담</span><b role="cell">${fmt(nonFinanceCount)}건</b></div>
+      <div role="row"><span role="cell">이번달 전체</span><b role="cell">${fmt(total)}건</b></div>
+    </div>
+  </div>`;
+}
+function budgetBars(entries) {
+  const max = Math.max(...entries.map(([,value]) => value), 1);
+  return `<div class="budget-bars">${entries.map(([label,value]) => `<div>
+    <span>${escapeHtml(label)}</span>
+    <i><em style="width:${value / max * 100}%"></em></i>
+    <b>${fmt(value)}건</b>
+  </div>`).join("")}</div>`;
+}
 function topicCloud(entries) { return `<div class="topics">${entries.map(([k,v]) => `<span>${escapeHtml(k)}<b>${v}</b></span>`).join("")}</div>`; }
 function inquiryTable(rows) { return `<div class="table"><table><thead><tr><th>문의일</th><th>전화번호</th><th>타입</th><th>문의 종류</th><th>차종</th><th>예산</th><th>할부</th><th>방문</th><th>담당자</th><th>희망 조건</th></tr></thead><tbody>${rows.map(r => `<tr><td>${r.inquiryDate||"-"}</td><td>${normalizePhone(r.phone||"")}</td><td>${r.inquiryChannel||"전화"}</td><td><span class="chip">${escapeHtml(r.inquiryType||"-")}</span></td><td><b>${escapeHtml((r.models||[]).join(", ")||"-")}</b></td><td>${escapeHtml(budgetLabel(r))}</td><td>${r.financeStatus||"미확인"}</td><td>${r.visitStatus||"미확인"}</td><td>${escapeHtml(r.staffName||"미입력")}</td><td>${escapeHtml(r.conditionRaw||"-")}</td></tr>`).join("")}</tbody></table></div>`; }
 function customerTable(customers) { return `<table class="customers"><thead><tr><th>연락처</th><th>최근 상담일</th><th>최초 문의일</th><th>희망 차종</th><th>문의 종류</th><th>최근 예산</th><th>방문</th><th>응대 직원</th><th>최근 희망 조건</th></tr></thead><tbody>${customers.map(c => `<tr data-customer="${c.id}"><td><button class="link">${c.phone}</button></td><td>${c.lastInquiryDate||"-"}</td><td>${c.firstInquiryDate||"-"}</td><td><b>${escapeHtml(c.models.join(", ")||"-")}</b></td><td>${c.inquiryTypes.map(t=>`<span class="chip">${escapeHtml(t)}</span>`).join("")}</td><td>${escapeHtml(c.budgetLabel)}</td><td>${c.visitStatus}</td><td>${escapeHtml(c.staffNames.join(", ")||"미입력")}</td><td>${escapeHtml(c.latestCondition||"-")}</td></tr>`).join("")}</tbody></table>`; }
