@@ -61,21 +61,29 @@ const budgetLabel = (row) => {
 };
 const budgetRangeFromCondition = (value = "") => {
   const text = String(value).replaceAll(",", "").replace(/\s+/g, " ");
-  let match = text.match(/(\d{3,5})\s*(?:만(?:원)?)?\s*(초반|중반|후반)/);
+  let match = text.match(/(\d{3,5})\s*(?:만(?:원)?)?\s*(초중반|초반|중반|후반)/);
   let base;
   let band;
+  let scale = 1;
   if (match) {
     base = Math.floor(Number(match[1]) / 1000) * 1000;
     band = match[2];
   } else {
-    match = text.match(/(\d*)\s*천\s*(초반|중반|후반)/);
-    if (!match) return null;
-    base = Number(match[1] || 1) * 1000;
-    band = match[2];
+    match = text.match(/(\d*)\s*천\s*(초중반|초반|중반|후반)/);
+    if (match) {
+      base = Number(match[1] || 1) * 1000;
+      band = match[2];
+    } else {
+      match = text.match(/(\d+(?:\.\d+)?)\s*억\s*(초중반|초반|중반|후반)/);
+      if (!match) return null;
+      base = Number(match[1]) * 10000;
+      band = match[2];
+      scale = 10;
+    }
   }
   if (!base) return null;
-  const offsets = { 초반:[0,300], 중반:[400,600], 후반:[700,900] };
-  return { min:base + offsets[band][0], max:base + offsets[band][1], band };
+  const offsets = { 초반:[0,300], 초중반:[0,600], 중반:[400,600], 후반:[700,900] };
+  return { min:base + offsets[band][0] * scale, max:base + offsets[band][1] * scale, band };
 };
 const includesAncillaryCost = (row) => (row.topics || []).includes("부대비용 포함");
 const topicsFromText = (conditionRaw = "", inquiryType = "", financeStatus = "") => {
@@ -260,9 +268,10 @@ function renderOverview() {
   const recent31Rows = dated.filter(r => r.inquiryDate >= recentStartKey && r.inquiryDate <= latestKey);
   const recentByModel = count(recent31Rows.flatMap(r => r.models || []));
   const recentTopModel = topEntries(recentByModel, 1)[0];
-  const financeCount = currentMonthRows.filter(r => r.financeStatus === "예").length;
-  const financeRatio = currentMonthRows.length ? financeCount / currentMonthRows.length * 100 : 0;
-  const currentMonthStaff = count(currentMonthRows.filter(r => r.staffName).map(r => r.staffName));
+  const financeCount = leads.filter(r => r.financeStatus === "예").length;
+  const financeRatio = leads.length ? financeCount / leads.length * 100 : 0;
+  const staffEntries = topEntries(count(leads.filter(r => r.staffName).map(r => r.staffName)), 12);
+  const assignedCount = staffEntries.reduce((sum,[,value]) => sum + value, 0);
   const byBudget = count(leads.filter(r => r.budgetMin || r.budgetMax).map(budgetBand));
   const budgetEntries = orderedBudgetEntries(byBudget);
   app.innerHTML = `
@@ -274,11 +283,11 @@ function renderOverview() {
     </section>
     <section class="grid">
       ${card("일별 문의 현황", "문의 날짜 기준 상담 건수", verticalBars(Object.entries(byDate).sort()), "wide")}
-      ${card(`${monthLabel(currentMonth)} 할부 문의 비율`, `이번달 전체 상담 ${fmt(currentMonthRows.length)}건 기준`, financeSummary(financeCount, currentMonthRows.length, financeRatio), "chart overview-card")}
-      ${card("담당자별 처리 건수", `${monthLabel(currentMonth)} · 담당자 입력 건만 집계`, donut(topEntries(currentMonthStaff,12), true), "chart overview-card")}
-      ${card("고객 희망 예산 금액대", `전체 DB 기준 · 예산 입력 ${fmt(budgetEntries.reduce((sum,[,value]) => sum + value, 0))}건`, budgetBars(budgetEntries), "wide budget-overview")}
       ${card("문의 종류", "구매·판매·할부 등", donut(topEntries(byType,7), true), "chart overview-card")}
       ${card("인기 차종 TOP 10", "전체 DB 기준 · 복수 차종은 각각 집계", rankedCounts(topEntries(byModel,10)), "chart overview-card")}
+      ${card("전체 DB 할부 문의 비율", `전체 상담 ${fmt(leads.length)}건 기준`, financeSummary(financeCount, leads.length, financeRatio), "chart overview-card")}
+      ${card("담당자별 처리 건수", `전체 DB 기준 · 담당자 입력 ${fmt(assignedCount)}건`, donut(staffEntries, true, true), "chart overview-card")}
+      ${card("고객 희망 예산 금액대", `전체 DB 기준 · 예산 입력 ${fmt(budgetEntries.reduce((sum,[,value]) => sum + value, 0))}건`, budgetBars(budgetEntries), "wide budget-overview")}
     </section>`;
 }
 
@@ -523,7 +532,7 @@ function card(title, subtitle, body, cls="") { return `<article class="card ${cl
 function bars(entries) { const max = Math.max(...entries.map(([,v]) => v), 1); return `<div class="bars">${entries.map(([k,v]) => `<div><span>${escapeHtml(k)}</span><b>${v}</b><i><em style="width:${v/max*100}%"></em></i></div>`).join("")}</div>`; }
 function rankedCounts(entries) { return `<div class="ranked-counts">${entries.map(([k,v],i) => `<div><span><em>${i+1}</em>${escapeHtml(k)}</span><strong>${fmt(v)}<small>대</small></strong></div>`).join("") || `<p class="empty">표시할 차종 데이터가 없습니다.</p>`}</div>`; }
 function verticalBars(entries) { const max = Math.max(...entries.map(([,v]) => v), 1); return `<div class="vbars">${entries.map(([k,v]) => `<div><b>${v}</b><i style="height:${Math.max(v/max*100,3)}%"></i><span>${escapeHtml(String(k).slice(5).replace("-","/"))}</span></div>`).join("")}</div>`; }
-function donut(entries, chartRight=false) { const total = entries.reduce((s,[,v])=>s+v,0); let p=0; const colors=["#2f6fed","#16a085","#f59e0b","#8b5cf6","#ef5da8","#64748b","#0ea5e9","#f97316","#14b8a6","#eab308"]; const seg=entries.map(([,v],i)=>{const s=p; p+=total?v/total*100:0; return `${colors[i%colors.length]} ${s}% ${p}%`;}).join(","); const chart=`<div class="donut" style="background:conic-gradient(${seg || "#e2e8f0 0 100%"})"><div><strong>${fmt(total)}</strong><span>건</span></div></div>`; const legend=`<div class="legend">${entries.map(([k,v],i)=>`<span><i style="background:${colors[i%colors.length]}"></i>${escapeHtml(k)}<b>${fmt(v)}</b></span>`).join("")}</div>`; return `<div class="donut-wrap ${chartRight ? "chart-right" : ""}">${chartRight ? legend + chart : chart + legend}</div>`; }
+function donut(entries, chartRight=false, showRatio=false) { const total = entries.reduce((s,[,v])=>s+v,0); let p=0; const colors=["#2f6fed","#16a085","#f59e0b","#8b5cf6","#ef5da8","#64748b","#0ea5e9","#f97316","#14b8a6","#eab308"]; const seg=entries.map(([,v],i)=>{const s=p; p+=total?v/total*100:0; return `${colors[i%colors.length]} ${s}% ${p}%`;}).join(","); const chart=`<div class="donut" style="background:conic-gradient(${seg || "#e2e8f0 0 100%"})"><div><strong>${fmt(total)}</strong><span>건</span></div></div>`; const legend=`<div class="legend">${entries.map(([k,v],i)=>`<span><i style="background:${colors[i%colors.length]}"></i>${escapeHtml(k)}<b>${fmt(v)}${showRatio ? `건 <small>${total ? (v/total*100).toFixed(1) : "0.0"}%</small>` : ""}</b></span>`).join("")}</div>`; return `<div class="donut-wrap ${chartRight ? "chart-right" : ""}">${chartRight ? legend + chart : chart + legend}</div>`; }
 function budgetBand(row) { const value = Number(row.budgetMax || row.budgetMin || 0); if (!value) return "미입력"; if (value < 1000) return "1천만원 미만"; if (value < 2000) return "1천~2천만원"; if (value < 3000) return "2천~3천만원"; if (value < 4000) return "3천~4천만원"; if (value < 5000) return "4천~5천만원"; return "5천만원 이상"; }
 function orderedBudgetEntries(byBudget) {
   return ["1천만원 미만","1천~2천만원","2천~3천만원","3천~4천만원","4천~5천만원","5천만원 이상"]
@@ -533,10 +542,10 @@ function financeSummary(financeCount, total, ratio) {
   const nonFinanceCount = Math.max(total - financeCount, 0);
   return `<div class="finance-summary">
     <div class="finance-rate"><strong>${ratio.toFixed(1)}<small>%</small></strong><span>할부 문의</span></div>
-    <div class="finance-table" role="table" aria-label="이번달 할부 문의 비율">
+    <div class="finance-table" role="table" aria-label="전체 DB 할부 문의 비율">
       <div role="row"><span role="cell">할부 문의</span><b role="cell">${fmt(financeCount)}건</b></div>
       <div role="row"><span role="cell">그 외 상담</span><b role="cell">${fmt(nonFinanceCount)}건</b></div>
-      <div role="row"><span role="cell">이번달 전체</span><b role="cell">${fmt(total)}건</b></div>
+      <div role="row"><span role="cell">전체 상담</span><b role="cell">${fmt(total)}건</b></div>
     </div>
   </div>`;
 }
@@ -711,6 +720,10 @@ function openLeadForm(initialPhone="", existing=null) {
     const inferredBudget=budgetRangeFromCondition(conditionRaw);
     let budgetMin=inferredBudget?.min || parseFormattedNumber(f.get("budgetMin"));
     let budgetMax=inferredBudget?.max || parseFormattedNumber(f.get("budgetMax"));
+    if (!inferredBudget && budgetMin && budgetMax && budgetMin === budgetMax) {
+      budgetMax=budgetMin;
+      budgetMin=null;
+    }
     if (budgetMin && budgetMax && budgetMin > budgetMax) { alert("최소 예산은 최대 예산보다 클 수 없습니다."); return; }
     const inquiryType=String(f.get("inquiryType")||"구매").trim();
     const financeStatus=conditionRaw.includes("할부") ? "예" : f.get("financeStatus");
