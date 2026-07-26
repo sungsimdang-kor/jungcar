@@ -3,6 +3,7 @@
 // 필요한 속성:
 // AUTH_USERNAME = admin
 // AUTH_PASSWORD_SHA256 = 비밀번호의 SHA-256 해시
+// AUTH_USERS_JSON = {"추가아이디":"비밀번호의 SHA-256 해시"}
 
 const SHEET_NAME = "고객DB";
 const SESSION_TTL_SECONDS = 21600;
@@ -44,10 +45,17 @@ function login(username, password) {
   const props = PropertiesService.getScriptProperties();
   const storedUsername = props.getProperty("AUTH_USERNAME");
   const storedPasswordHash = props.getProperty("AUTH_PASSWORD_SHA256");
-  if (!storedUsername || !storedPasswordHash) {
+  const users = {};
+  if (storedUsername && storedPasswordHash) users[storedUsername] = storedPasswordHash;
+  try {
+    Object.assign(users, JSON.parse(props.getProperty("AUTH_USERS_JSON") || "{}"));
+  } catch (error) {
+    return { ok: false, error: "추가 로그인 계정 설정을 확인하세요." };
+  }
+  if (!Object.keys(users).length) {
     return { ok: false, error: "Apps Script 인증 설정이 아직 없습니다." };
   }
-  if (username !== storedUsername || sha256(password || "") !== storedPasswordHash) {
+  if (!users[username] || sha256(password || "") !== users[username]) {
     return { ok: false, error: "아이디 또는 비밀번호가 올바르지 않습니다." };
   }
   const token = Utilities.getUuid() + Utilities.getUuid();
