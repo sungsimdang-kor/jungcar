@@ -282,7 +282,10 @@ input,select,textarea {
   padding:9px 10px;
   font:inherit;
   background:#fff;
+  color:#1e293b;
+  color-scheme:light;
 }
+select option { background:#fff;color:#1e293b; }
 textarea { resize:vertical; }
 .toolbar button,.sync-buttons button,.detail button,.modal button,.analysis-filter button {
   background:var(--blue);
@@ -416,7 +419,8 @@ textarea { resize:vertical; }
 .model-suggestions p { color:var(--muted);font-size:12px;margin:8px 10px; }
 .checkbox-field { display:grid;gap:6px;color:#526076;font-size:12px;font-weight:800; }
 .inline-check { display:flex!important;align-items:center;gap:8px;min-height:40px;border:1px solid #d7dee8;border-radius:8px;padding:8px 10px;background:#fff; }
-.inline-check input { width:auto;min-height:auto; }
+.inline-check input { width:18px;height:18px;min-height:auto;accent-color:var(--blue);flex:0 0 auto; }
+.status-check { color:#334155;font-size:13px;cursor:pointer; }
 .budget-hint { grid-column:1/-1;margin:0;color:var(--muted);font-size:11px;line-height:1.55;background:#f8fafc;border-radius:8px;padding:10px 12px; }
 .modal menu {
   background:#fff;
