@@ -321,6 +321,8 @@ textarea { resize:vertical; }
 }
 .detail-head h2 { color:var(--navy);font-size:28px;margin:4px 0; }
 .detail-head span,.detail-head p { color:var(--muted);font-size:12px;margin:0; }
+.detail-nav { display:grid;gap:8px; }
+.detail-nav button { white-space:nowrap; }
 .customer-summary {
   background:var(--navy);
   color:#fff;
