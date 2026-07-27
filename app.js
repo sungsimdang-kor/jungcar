@@ -560,7 +560,10 @@ function detailItem(label, value) { return `<div><span>${label}</span><b>${escap
 function customerDetail(c) {
   return `<section class="detail">
     <div class="detail-head">
-      <button id="back" class="secondary">← 고객 목록</button>
+      <div class="detail-nav">
+        <button id="back" class="secondary">← 고객 목록으로 돌아가기</button>
+        <button id="addCustomer" class="secondary">+ 다른 고객 추가</button>
+      </div>
       <div><span>고객 식별번호</span><h2>${escapeHtml(c.phone)}</h2><p>최초 문의 ${c.firstInquiryDate || "-"} · 최근 문의 ${c.lastInquiryDate || "-"}</p></div>
       <button id="addInquiry">+ 추가 상담 기록</button>
     </div>
@@ -586,6 +589,7 @@ function customerDetail(c) {
 }
 function bindDetail() {
   $("#back").onclick=()=>{selectedCustomer=null;renderCustomers();};
+  $("#addCustomer").onclick=()=>openLeadForm();
   $("#addInquiry").onclick=()=>openLeadForm(selectedCustomer.phone);
   $$("[data-edit]").forEach(b=>b.onclick=()=>openLeadForm(null, leads.find(r=>r.id===b.dataset.edit)));
   $$("[data-del]").forEach(b=>b.onclick=async()=>{
