@@ -348,7 +348,7 @@ function filteredAnalysisRows() {
     const searchable = [
       r.inquiryDate, r.phone, r.inquiryType, ...(r.models || []),
       r.budgetMin, r.budgetMax, r.purchaseTiming, r.financeStatus, r.visitStatus,
-      ...(r.topics || []), r.followUpDate, r.conditionRaw,
+      r.conditionRaw,
     ].join(" ").toLowerCase();
     if (term && !searchable.includes(term)) return false;
     if (f.dateFrom && (r.inquiryDate || "") < f.dateFrom) return false;
@@ -373,7 +373,6 @@ function renderAnalysisResults() {
   const byFinance = count(rows.map(r => r.financeStatus || "미확인"));
   const byVisit = count(rows.map(r => r.visitStatus || "미확인"));
   const byTiming = count(rows.map(r => r.purchaseTiming || "미입력"));
-  const byTopic = count(rows.flatMap(r => r.topics?.length ? r.topics : ["미입력"]));
   const byWeekday = count(dated.map(r => weekdayLabels[parseDate(r.inquiryDate).getDay()]));
   const orderedWeekdays = weekdayLabels.slice(1).concat(weekdayLabels[0]).map(day => [day, byWeekday[day] || 0]);
   const budgetRows = rows.filter(r => r.budgetMin || r.budgetMax);
@@ -394,7 +393,6 @@ function renderAnalysisResults() {
       ${card("할부 여부", "할부 문의 현황", bars(topEntries(byFinance,8)))}
       ${card("방문 여부", "방문·예약 현황", bars(topEntries(byVisit,8)))}
       ${card("구매 예정일", "구매 시점 분포", bars(topEntries(byTiming,10)))}
-      ${card("문의 주제", "입력된 문의 주제 태그", bars(topEntries(byTopic,12)), "wide")}
     </section>`;
 }
 
@@ -545,7 +543,6 @@ function budgetBars(entries) {
     <b>${fmt(value)}건</b>
   </div>`).join("")}</div>`;
 }
-function topicCloud(entries) { return `<div class="topics">${entries.map(([k,v]) => `<span>${escapeHtml(k)}<b>${v}</b></span>`).join("")}</div>`; }
 function inquiryTable(rows) { return `<div class="table"><table><thead><tr><th>문의일</th><th>전화번호</th><th>문의 종류</th><th>차종</th><th>예산</th><th>할부</th><th>방문</th><th>희망 조건</th></tr></thead><tbody>${rows.map(r => `<tr><td>${r.inquiryDate||"-"}</td><td>${normalizePhone(r.phone||"")}</td><td><span class="chip">${escapeHtml(r.inquiryType||"-")}</span></td><td><b>${escapeHtml((r.models||[]).join(", ")||"-")}</b></td><td>${escapeHtml(budgetLabel(r))}</td><td>${r.financeStatus||"미확인"}</td><td>${r.visitStatus||"미확인"}</td><td>${escapeHtml(r.conditionRaw||"-")}</td></tr>`).join("")}</tbody></table></div>`; }
 function customerTable(customers) { return `<table class="customers"><thead><tr><th>연락처</th><th>최근 상담일</th><th>최초 문의일</th><th>희망 차종</th><th>문의 종류</th><th>최근 예산</th><th>방문</th><th>최근 희망 조건</th></tr></thead><tbody>${customers.map(c => `<tr data-customer="${c.id}"><td><button class="link">${c.phone}</button></td><td>${c.lastInquiryDate||"-"}</td><td>${c.firstInquiryDate||"-"}</td><td><b>${escapeHtml(c.models.join(", ")||"-")}</b></td><td>${c.inquiryTypes.map(t=>`<span class="chip">${escapeHtml(t)}</span>`).join("")}</td><td>${escapeHtml(c.budgetLabel)}</td><td>${c.visitStatus}</td><td>${escapeHtml(c.latestCondition||"-")}</td></tr>`).join("")}</tbody></table>`; }
 function bindCustomerRows() { $$("#customerTable tr[data-customer]").forEach(tr => tr.onclick = () => { selectedCustomer = buildCustomers().find(c => c.id === tr.dataset.customer); renderCustomers(); }); }
@@ -572,8 +569,6 @@ function customerDetail(c) {
         ${detailItem("구매 예정일", r.purchaseTiming)}
         ${detailItem("할부 여부", r.financeStatus)}
         ${detailItem("방문 여부", r.visitStatus)}
-        ${detailItem("후속 연락일", r.followUpDate)}
-        ${detailItem("문의 주제", (r.topics || []).join(", "))}
       </div>
       <div class="condition"><span>희망 조건·상담 메모</span><p>${escapeHtml(r.conditionRaw || "미입력")}</p></div>
     </article>`).join("")}</div>
@@ -662,8 +657,6 @@ function openLeadForm(initialPhone="", existing=null) {
     <section class="form-section"><h3>상담 진행 정보</h3><div class="form-grid">
       ${formField("할부 여부", `<select name="financeStatus"><option ${selected(r.financeStatus||"미확인","미확인")}>미확인</option><option ${selected(r.financeStatus,"예")}>예</option><option ${selected(r.financeStatus,"아니오")}>아니오</option></select>`)}
       ${formField("방문 여부", `<select name="visitStatus"><option ${selected(r.visitStatus||"미확인","미확인")}>미확인</option><option ${selected(r.visitStatus,"예")}>예</option><option ${selected(r.visitStatus,"아니오")}>아니오</option></select>`)}
-      ${formField("후속 연락일", `<input name="followUpDate" type="date" value="${escapeHtml(r.followUpDate||"")}">`)}
-      ${formField("문의 주제", `<input name="topics" value="${escapeHtml((r.topics||[]).join(", "))}" placeholder="가격, 옵션, 방문 등 쉼표로 구분">`, "full")}
       ${formField("희망 조건·상담 메모", `<textarea name="conditionRaw" rows="4" placeholder="핵심 조건을 간략히 입력">${escapeHtml(r.conditionRaw||"")}</textarea>`, "full")}
     </div></section>
     <menu><button type="button" class="secondary" data-close-modal>취소</button><button id="saveLead" value="default">저장</button></menu>
@@ -708,9 +701,8 @@ function openLeadForm(initialPhone="", existing=null) {
     const inquiryType=String(f.get("inquiryType")||"구매").trim();
     const financeStatus=conditionRaw.includes("할부") ? "예" : f.get("financeStatus");
     const ancillaryIncluded=f.get("ancillaryIncluded")==="on";
-    const manualTopics=String(f.get("topics")||"").split(",").map(s=>s.trim()).filter(t=>t && t!=="부대비용 포함");
-    const topics=uniq([...manualTopics,...topicsFromText(conditionRaw,inquiryType,financeStatus),...(ancillaryIncluded?["부대비용 포함"]:[])]);
-    const row={...r,id:r.id||`local-${Date.now()}`,source:"manual",inquiryDate:f.get("inquiryDate"),phone,inquiryChannel:r.inquiryChannel||"",inquiryType,models:[f.get("model1"),f.get("model2"),f.get("model3")].map(s=>String(s||"").trim()).filter(Boolean),budgetMin,budgetMax,budgetRaw:[budgetMin,budgetMax].filter(Boolean).join("~"),budgetBucket:"표현형",purchaseTiming:String(f.get("purchaseTiming")||"").trim(),financeStatus,visitStatus:f.get("visitStatus"),staffName:r.staffName||"",leadSource:r.leadSource||"",callOutcome:r.callOutcome||"",followUpDate:f.get("followUpDate"),conditionRaw,topics};
+    const topics=uniq([...(r.topics||[]).filter(t=>t && t!=="부대비용 포함"),...topicsFromText(conditionRaw,inquiryType,financeStatus),...(ancillaryIncluded?["부대비용 포함"]:[])]);
+    const row={...r,id:r.id||`local-${Date.now()}`,source:"manual",inquiryDate:f.get("inquiryDate"),phone,inquiryChannel:r.inquiryChannel||"",inquiryType,models:[f.get("model1"),f.get("model2"),f.get("model3")].map(s=>String(s||"").trim()).filter(Boolean),budgetMin,budgetMax,budgetRaw:[budgetMin,budgetMax].filter(Boolean).join("~"),budgetBucket:"표현형",purchaseTiming:String(f.get("purchaseTiming")||"").trim(),financeStatus,visitStatus:f.get("visitStatus"),staffName:r.staffName||"",leadSource:r.leadSource||"",callOutcome:r.callOutcome||"",followUpDate:r.followUpDate||"",conditionRaw,topics};
     if(existing) leads=leads.map(x=>x.id===row.id?row:x); else leads=[row,...leads];
     await syncUpsert(row);
     dlg.close();
@@ -723,7 +715,7 @@ function openLeadForm(initialPhone="", existing=null) {
     dlg.remove();
   }, { once:true });
 }
-function exportCsv() { const csv=["문의 날짜,연락처,문의 종류,희망 차량 1,희망 차량 2,희망 차량 3,최소 예산,최대 예산,부대비용 포함,구매 예정일,할부 여부,방문 여부,문의 주제,후속 연락일,희망 조건",...leads.map(r=>[r.inquiryDate,r.phone,r.inquiryType,...[0,1,2].map(i=>(r.models||[])[i]||""),r.budgetMin,r.budgetMax,includesAncillaryCost(r)?"예":"아니오",r.purchaseTiming,r.financeStatus,r.visitStatus,(r.topics||[]).join(", "),r.followUpDate,r.conditionRaw].map(v=>`"${String(v||"").replaceAll('"','""')}"`).join(","))].join("\n"); const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob(["\ufeff",csv],{type:"text/csv;charset=utf-8"})); a.download=`jungcar-db-${today()}.csv`; a.click(); URL.revokeObjectURL(a.href); }
+function exportCsv() { const csv=["문의 날짜,연락처,문의 종류,희망 차량 1,희망 차량 2,희망 차량 3,최소 예산,최대 예산,부대비용 포함,구매 예정일,할부 여부,방문 여부,희망 조건",...leads.map(r=>[r.inquiryDate,r.phone,r.inquiryType,...[0,1,2].map(i=>(r.models||[])[i]||""),r.budgetMin,r.budgetMax,includesAncillaryCost(r)?"예":"아니오",r.purchaseTiming,r.financeStatus,r.visitStatus,r.conditionRaw].map(v=>`"${String(v||"").replaceAll('"','""')}"`).join(","))].join("\n"); const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob(["\ufeff",csv],{type:"text/csv;charset=utf-8"})); a.download=`jungcar-db-${today()}.csv`; a.click(); URL.revokeObjectURL(a.href); }
 function escapeHtml(v) { return String(v ?? "").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c])); }
 $$("[data-tab]").forEach(btn => btn.onclick = () => { activeTab = btn.dataset.tab; selectedCustomer = null; render(); });
 loadData();
