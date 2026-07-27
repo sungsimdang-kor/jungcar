@@ -235,8 +235,7 @@ button { cursor:pointer; }
 .budget-bars em { display:block;height:100%;border-radius:7px;background:linear-gradient(90deg,var(--blue),#16a085); }
 .budget-bars b { color:var(--navy);font-size:16px;text-align:right; }
 
-.topics { display:flex;flex-wrap:wrap;gap:8px; }
-.topics span,.chip {
+.chip {
   background:#edf3ff;
   color:var(--blue);
   border-radius:99px;
@@ -246,7 +245,6 @@ button { cursor:pointer; }
   display:inline-block;
   margin:2px;
 }
-.topics b { margin-left:6px; }
 .table { overflow:auto;scrollbar-gutter:stable; }
 table { border-collapse:collapse;min-width:1120px;width:100%;font-variant-numeric:tabular-nums; }
 th { background:#f8fafc;color:#6d7a8e;font-size:12px;font-weight:800;line-height:1.4;text-align:left;padding:12px 11px;white-space:nowrap; }
