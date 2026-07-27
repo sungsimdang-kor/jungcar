@@ -544,8 +544,18 @@ function budgetBars(entries) {
   </div>`).join("")}</div>`;
 }
 function inquiryTable(rows) { return `<div class="table"><table><thead><tr><th>문의일</th><th>전화번호</th><th>문의 종류</th><th>차종</th><th>예산</th><th>할부</th><th>방문</th><th>희망 조건</th></tr></thead><tbody>${rows.map(r => `<tr><td>${r.inquiryDate||"-"}</td><td>${normalizePhone(r.phone||"")}</td><td><span class="chip">${escapeHtml(r.inquiryType||"-")}</span></td><td><b>${escapeHtml((r.models||[]).join(", ")||"-")}</b></td><td>${escapeHtml(budgetLabel(r))}</td><td>${r.financeStatus||"미확인"}</td><td>${r.visitStatus||"미확인"}</td><td>${escapeHtml(r.conditionRaw||"-")}</td></tr>`).join("")}</tbody></table></div>`; }
-function customerTable(customers) { return `<table class="customers"><thead><tr><th>연락처</th><th>최근 상담일</th><th>최초 문의일</th><th>희망 차종</th><th>문의 종류</th><th>최근 예산</th><th>방문</th><th>최근 희망 조건</th></tr></thead><tbody>${customers.map(c => `<tr data-customer="${c.id}"><td><button class="link">${c.phone}</button></td><td>${c.lastInquiryDate||"-"}</td><td>${c.firstInquiryDate||"-"}</td><td><b>${escapeHtml(c.models.join(", ")||"-")}</b></td><td>${c.inquiryTypes.map(t=>`<span class="chip">${escapeHtml(t)}</span>`).join("")}</td><td>${escapeHtml(c.budgetLabel)}</td><td>${c.visitStatus}</td><td>${escapeHtml(c.latestCondition||"-")}</td></tr>`).join("")}</tbody></table>`; }
-function bindCustomerRows() { $$("#customerTable tr[data-customer]").forEach(tr => tr.onclick = () => { selectedCustomer = buildCustomers().find(c => c.id === tr.dataset.customer); renderCustomers(); }); }
+function customerTable(customers) { return `<table class="customers"><thead><tr><th>연락처</th><th>최근 상담일</th><th>최초 문의일</th><th>희망 차종</th><th>문의 종류</th><th>최근 예산</th><th>방문</th><th>최근 희망 조건</th><th>상담 추가</th></tr></thead><tbody>${customers.map(c => `<tr data-customer="${c.id}"><td><button class="link">${c.phone}</button></td><td>${c.lastInquiryDate||"-"}</td><td>${c.firstInquiryDate||"-"}</td><td><b>${escapeHtml(c.models.join(", ")||"-")}</b></td><td>${c.inquiryTypes.map(t=>`<span class="chip">${escapeHtml(t)}</span>`).join("")}</td><td>${escapeHtml(c.budgetLabel)}</td><td>${c.visitStatus}</td><td>${escapeHtml(c.latestCondition||"-")}</td><td><button class="quick-add" data-add-inquiry="${c.id}">+ 상담 추가</button></td></tr>`).join("")}</tbody></table>`; }
+function bindCustomerRows() {
+  $$("#customerTable tr[data-customer]").forEach(tr => tr.onclick = () => {
+    selectedCustomer = buildCustomers().find(c => c.id === tr.dataset.customer);
+    renderCustomers();
+  });
+  $$("#customerTable [data-add-inquiry]").forEach(button => button.onclick = event => {
+    event.stopPropagation();
+    const customer=buildCustomers().find(c=>c.id===button.dataset.addInquiry);
+    if (customer) openLeadForm(customer.phone);
+  });
+}
 function detailItem(label, value) { return `<div><span>${label}</span><b>${escapeHtml(value || "미입력")}</b></div>`; }
 function customerDetail(c) {
   return `<section class="detail">
@@ -645,6 +655,7 @@ function openLeadForm(initialPhone="", existing=null) {
       ${formField("연락처", `<input name="phone" inputmode="numeric" autocomplete="tel" maxlength="13" placeholder="010-0000-0000" value="${escapeHtml(formatPhoneInput(initialPhone||r.phone||""))}" required>`)}
       ${formField("문의 종류", `<select name="inquiryType" required>${inquiryTypeChoices.map(value=>`<option value="${escapeHtml(value)}" ${selected(r.inquiryType||"구매",value)}>${escapeHtml(value)}</option>`).join("")}</select>`)}
     </div></section>
+    <section id="existingCustomerNotice" class="existing-customer-notice" role="status" aria-live="polite" hidden></section>
     <section class="form-section"><h3>희망 차량과 예산</h3><div class="form-grid">
       ${formField("희망 차종 1", modelControl("model1", models[0]||"", "예: 쏘나타"))}
       ${formField("희망 차종 2", modelControl("model2", models[1]||"", "복수 차종일 때 입력"))}
@@ -668,8 +679,61 @@ function openLeadForm(initialPhone="", existing=null) {
   dlg.showModal();
   dlg.querySelectorAll("[data-close-modal]").forEach(button => button.addEventListener("click", () => dlg.close()));
   const phoneInput=dlg.querySelector('[name="phone"]');
+  const existingNotice=dlg.querySelector("#existingCustomerNotice");
+  const modalTitle=dlg.querySelector("#leadModalTitle");
+  const saveButton=dlg.querySelector("#saveLead");
+  let detectedCustomer=null;
+  const setControlValue=(name,value="")=>{
+    const control=dlg.querySelector(`[name="${name}"]`);
+    if (!control) return;
+    if (control.tagName==="SELECT" && value && ![...control.options].some(option=>option.value===value)) {
+      control.add(new Option(value,value));
+    }
+    control.value=value||"";
+  };
+  const copyLatestInquiry=customer=>{
+    const latest=customer?.inquiries?.[0];
+    if (!latest) return;
+    setControlValue("inquiryType",latest.inquiryType||"구매");
+    [0,1,2].forEach(index=>setControlValue(`model${index+1}`,(latest.models||[])[index]||""));
+    setControlValue("purchaseTiming",latest.purchaseTiming);
+    setControlValue("budgetMin",formatThousands(latest.budgetMin||""));
+    setControlValue("budgetMax",formatThousands(latest.budgetMax||""));
+    setControlValue("conditionRaw",latest.conditionRaw);
+    dlg.querySelector('[name="ancillaryIncluded"]').checked=includesAncillaryCost(latest);
+    dlg.querySelector('[name="financeStatus"]').checked=latest.financeStatus==="예";
+    dlg.querySelector('[name="visitStatus"]').checked=latest.visitStatus==="예";
+  };
+  const updateExistingCustomer=()=>{
+    if (existing) return;
+    const key=phoneKey(phoneInput.value);
+    detectedCustomer=key.length===11 ? buildCustomers().find(customer=>customer.id===key)||null : null;
+    if (!detectedCustomer) {
+      existingNotice.hidden=true;
+      existingNotice.innerHTML="";
+      modalTitle.textContent="고객·상담 추가";
+      saveButton.textContent="저장";
+      return;
+    }
+    const latest=detectedCustomer.inquiries[0]||{};
+    existingNotice.hidden=false;
+    existingNotice.innerHTML=`
+      <div><span>기존 고객 확인</span><strong>${escapeHtml(detectedCustomer.phone)}</strong><p>최근 상담 ${escapeHtml(detectedCustomer.lastInquiryDate||"-")} · 총 ${fmt(detectedCustomer.inquiries.length)}건 · ${escapeHtml((latest.models||[]).join(", ")||"희망 차종 미입력")} · ${escapeHtml(budgetLabel(latest))}</p></div>
+      <div class="existing-customer-actions"><button type="button" class="secondary" data-view-customer>기존 기록 보기</button><button type="button" data-copy-latest>최근 상담 불러오기</button></div>`;
+    modalTitle.textContent="기존 고객 추가 상담";
+    saveButton.textContent="추가 상담 기록 저장";
+    existingNotice.querySelector("[data-view-customer]").onclick=()=>{
+      const customer=detectedCustomer;
+      dlg.close();
+      selectedCustomer=customer;
+      activeTab="customers";
+      render();
+    };
+    existingNotice.querySelector("[data-copy-latest]").onclick=()=>copyLatestInquiry(detectedCustomer);
+  };
   phoneInput.addEventListener("input", () => {
     phoneInput.value=formatPhoneInput(phoneInput.value);
+    updateExistingCustomer();
   });
   dlg.querySelectorAll("[data-budget-input]").forEach(input => input.addEventListener("input", () => {
     input.value=formatThousands(input.value);
@@ -685,6 +749,7 @@ function openLeadForm(initialPhone="", existing=null) {
     }
     if (conditionInput.value.includes("할부")) dlg.querySelector('[name="financeStatus"]').checked=true;
   });
+  updateExistingCustomer();
   $("#saveLead").onclick=async(e)=>{
     e.preventDefault();
     const f=new FormData($("#leadForm"));
@@ -705,6 +770,11 @@ function openLeadForm(initialPhone="", existing=null) {
     const ancillaryIncluded=f.get("ancillaryIncluded")==="on";
     const topics=uniq([...(r.topics||[]).filter(t=>t && t!=="부대비용 포함"),...topicsFromText(conditionRaw,inquiryType,financeStatus),...(ancillaryIncluded?["부대비용 포함"]:[])]);
     const row={...r,id:r.id||`local-${Date.now()}`,source:"manual",inquiryDate:f.get("inquiryDate"),phone,inquiryChannel:r.inquiryChannel||"",inquiryType,models:[f.get("model1"),f.get("model2"),f.get("model3")].map(s=>String(s||"").trim()).filter(Boolean),budgetMin,budgetMax,budgetRaw:[budgetMin,budgetMax].filter(Boolean).join("~"),budgetBucket:"표현형",purchaseTiming:String(f.get("purchaseTiming")||"").trim(),financeStatus,visitStatus,staffName:r.staffName||"",leadSource:r.leadSource||"",callOutcome:r.callOutcome||"",followUpDate:r.followUpDate||"",conditionRaw,topics};
+    if (!existing) {
+      const signature=value=>JSON.stringify([phoneKey(value.phone),value.inquiryDate||"",value.inquiryType||"",value.models||[],Number(value.budgetMin||0),Number(value.budgetMax||0),value.financeStatus||"",value.visitStatus||"",String(value.conditionRaw||"").trim()]);
+      const duplicate=leads.find(item=>signature(item)===signature(row));
+      if (duplicate && !confirm("같은 날짜에 동일한 상담 내용이 이미 있습니다. 그래도 추가하시겠습니까?")) return;
+    }
     if(existing) leads=leads.map(x=>x.id===row.id?row:x); else leads=[row,...leads];
     await syncUpsert(row);
     dlg.close();
