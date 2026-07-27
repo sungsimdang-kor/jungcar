@@ -637,12 +637,13 @@ function bindModelAutocomplete(root) {
 function openLeadForm(initialPhone="", existing=null) {
   const r=existing||{};
   const models=(r.models||[]);
+  const inquiryTypeChoices=uniq([r.inquiryType,"구매","판매","판매 후 구매","할부/한도","방문 일정","수리/보증","기타/문의"]);
   const html=`<dialog class="modal lead-modal" aria-labelledby="leadModalTitle"><form method="dialog" id="leadForm">
     <div class="modal-head"><div><span>${existing ? "CONSULTATION EDIT" : "NEW CONSULTATION"}</span><h2 id="leadModalTitle">${existing?"상담 내역 수정":"고객·상담 추가"}</h2></div><button type="button" class="icon-button" data-close-modal aria-label="닫기">×</button></div>
     <section class="form-section"><h3>기본 정보</h3><div class="form-grid">
       ${formField("문의 날짜", `<input name="inquiryDate" type="date" value="${r.inquiryDate||today()}" required>`)}
       ${formField("연락처", `<input name="phone" inputmode="numeric" autocomplete="tel" maxlength="13" placeholder="010-0000-0000" value="${escapeHtml(formatPhoneInput(initialPhone||r.phone||""))}" required>`)}
-      ${formField("문의 종류", `<input name="inquiryType" list="inquiryTypes" value="${escapeHtml(r.inquiryType||"구매")}" required><datalist id="inquiryTypes"><option value="구매"><option value="판매"><option value="판매 후 구매"><option value="할부/한도"><option value="방문 일정"><option value="수리/보증"><option value="기타/문의"></datalist>`)}
+      ${formField("문의 종류", `<select name="inquiryType" required>${inquiryTypeChoices.map(value=>`<option value="${escapeHtml(value)}" ${selected(r.inquiryType||"구매",value)}>${escapeHtml(value)}</option>`).join("")}</select>`)}
     </div></section>
     <section class="form-section"><h3>희망 차량과 예산</h3><div class="form-grid">
       ${formField("희망 차종 1", modelControl("model1", models[0]||"", "예: 쏘나타"))}
@@ -655,8 +656,8 @@ function openLeadForm(initialPhone="", existing=null) {
       <p class="budget-hint">희망 조건에 ‘3000 초반’ 입력 시 최소 3,000만원·최대 3,300만원으로 자동 입력됩니다. 중반은 3,400~3,600만원, 후반은 3,700~3,900만원 기준입니다.</p>
     </div></section>
     <section class="form-section"><h3>상담 진행 정보</h3><div class="form-grid">
-      ${formField("할부 여부", `<select name="financeStatus"><option ${selected(r.financeStatus||"미확인","미확인")}>미확인</option><option ${selected(r.financeStatus,"예")}>예</option><option ${selected(r.financeStatus,"아니오")}>아니오</option></select>`)}
-      ${formField("방문 여부", `<select name="visitStatus"><option ${selected(r.visitStatus||"미확인","미확인")}>미확인</option><option ${selected(r.visitStatus,"예")}>예</option><option ${selected(r.visitStatus,"아니오")}>아니오</option></select>`)}
+      <div class="checkbox-field"><span>할부 여부</span><label class="inline-check status-check"><input name="financeStatus" type="checkbox" ${r.financeStatus==="예" ? "checked" : ""}> 할부 문의 있음</label></div>
+      <div class="checkbox-field"><span>방문 여부</span><label class="inline-check status-check"><input name="visitStatus" type="checkbox" ${r.visitStatus==="예" ? "checked" : ""}> 방문 예정·완료</label></div>
       ${formField("희망 조건·상담 메모", `<textarea name="conditionRaw" rows="4" placeholder="핵심 조건을 간략히 입력">${escapeHtml(r.conditionRaw||"")}</textarea>`, "full")}
     </div></section>
     <menu><button type="button" class="secondary" data-close-modal>취소</button><button id="saveLead" value="default">저장</button></menu>
@@ -682,7 +683,7 @@ function openLeadForm(initialPhone="", existing=null) {
       dlg.querySelector('[name="budgetMin"]').value=formatThousands(inferred.min);
       dlg.querySelector('[name="budgetMax"]').value=formatThousands(inferred.max);
     }
-    if (conditionInput.value.includes("할부")) dlg.querySelector('[name="financeStatus"]').value="예";
+    if (conditionInput.value.includes("할부")) dlg.querySelector('[name="financeStatus"]').checked=true;
   });
   $("#saveLead").onclick=async(e)=>{
     e.preventDefault();
@@ -699,10 +700,11 @@ function openLeadForm(initialPhone="", existing=null) {
     }
     if (budgetMin && budgetMax && budgetMin > budgetMax) { alert("최소 예산은 최대 예산보다 클 수 없습니다."); return; }
     const inquiryType=String(f.get("inquiryType")||"구매").trim();
-    const financeStatus=conditionRaw.includes("할부") ? "예" : f.get("financeStatus");
+    const financeStatus=conditionRaw.includes("할부") || f.get("financeStatus")==="on" ? "예" : "아니오";
+    const visitStatus=f.get("visitStatus")==="on" ? "예" : "아니오";
     const ancillaryIncluded=f.get("ancillaryIncluded")==="on";
     const topics=uniq([...(r.topics||[]).filter(t=>t && t!=="부대비용 포함"),...topicsFromText(conditionRaw,inquiryType,financeStatus),...(ancillaryIncluded?["부대비용 포함"]:[])]);
-    const row={...r,id:r.id||`local-${Date.now()}`,source:"manual",inquiryDate:f.get("inquiryDate"),phone,inquiryChannel:r.inquiryChannel||"",inquiryType,models:[f.get("model1"),f.get("model2"),f.get("model3")].map(s=>String(s||"").trim()).filter(Boolean),budgetMin,budgetMax,budgetRaw:[budgetMin,budgetMax].filter(Boolean).join("~"),budgetBucket:"표현형",purchaseTiming:String(f.get("purchaseTiming")||"").trim(),financeStatus,visitStatus:f.get("visitStatus"),staffName:r.staffName||"",leadSource:r.leadSource||"",callOutcome:r.callOutcome||"",followUpDate:r.followUpDate||"",conditionRaw,topics};
+    const row={...r,id:r.id||`local-${Date.now()}`,source:"manual",inquiryDate:f.get("inquiryDate"),phone,inquiryChannel:r.inquiryChannel||"",inquiryType,models:[f.get("model1"),f.get("model2"),f.get("model3")].map(s=>String(s||"").trim()).filter(Boolean),budgetMin,budgetMax,budgetRaw:[budgetMin,budgetMax].filter(Boolean).join("~"),budgetBucket:"표현형",purchaseTiming:String(f.get("purchaseTiming")||"").trim(),financeStatus,visitStatus,staffName:r.staffName||"",leadSource:r.leadSource||"",callOutcome:r.callOutcome||"",followUpDate:r.followUpDate||"",conditionRaw,topics};
     if(existing) leads=leads.map(x=>x.id===row.id?row:x); else leads=[row,...leads];
     await syncUpsert(row);
     dlg.close();
