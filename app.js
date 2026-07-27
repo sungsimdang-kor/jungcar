@@ -611,6 +611,17 @@ function formField(label, control, cls="") { return `<label class="${cls}"><span
 function modelControl(name, value="", placeholder="") {
   return `<div class="model-autocomplete"><input name="${name}" data-model-autocomplete autocomplete="off" aria-autocomplete="list" aria-expanded="false" value="${escapeHtml(value)}" placeholder="${escapeHtml(placeholder)}"><div class="model-suggestions" role="listbox" hidden></div></div>`;
 }
+function resolveFirstModelMatch(input) {
+  const query=input.value.trim().toLocaleLowerCase("ko-KR");
+  if (!query) return "";
+  const match=CAR_MODELS.find(item=>item.name.toLocaleLowerCase("ko-KR")===query)
+    || CAR_MODELS.find(item=>item.name.toLocaleLowerCase("ko-KR").includes(query));
+  if (match) {
+    input.value=match.name;
+    input.dispatchEvent(new Event("change",{bubbles:true}));
+  }
+  return match?.name||"";
+}
 function bindModelAutocomplete(root) {
   root.querySelectorAll("[data-model-autocomplete]").forEach(input => {
     const menu = input.parentElement.querySelector(".model-suggestions");
@@ -650,8 +661,16 @@ function bindModelAutocomplete(root) {
     input.addEventListener("focus", showMatches);
     input.addEventListener("keydown", event => {
       if (event.key === "Escape") closeMenu();
+      if (event.key === "Enter" && !menu.hidden) {
+        event.preventDefault();
+        resolveFirstModelMatch(input);
+        closeMenu();
+      }
     });
-    input.addEventListener("blur", () => setTimeout(closeMenu, 120));
+    input.addEventListener("blur", () => setTimeout(() => {
+      resolveFirstModelMatch(input);
+      closeMenu();
+    }, 120));
   });
 }
 function openLeadForm(initialPhone="", existing=null) {
@@ -694,6 +713,8 @@ function openLeadForm(initialPhone="", existing=null) {
   const modalTitle=dlg.querySelector("#leadModalTitle");
   const saveButton=dlg.querySelector("#saveLead");
   let detectedCustomer=null;
+  let autoFilledCustomerId=null;
+  let saveInProgress=false;
   const setControlValue=(name,value="")=>{
     const control=dlg.querySelector(`[name="${name}"]`);
     if (!control) return;
@@ -715,11 +736,20 @@ function openLeadForm(initialPhone="", existing=null) {
     dlg.querySelector('[name="financeStatus"]').checked=latest.financeStatus==="예";
     dlg.querySelector('[name="visitStatus"]').checked=latest.visitStatus==="예";
   };
+  const copyLatestVehicleAndBudget=customer=>{
+    const latest=customer?.inquiries?.[0];
+    if (!latest) return;
+    [0,1,2].forEach(index=>setControlValue(`model${index+1}`,(latest.models||[])[index]||""));
+    setControlValue("budgetMin",formatThousands(latest.budgetMin||""));
+    setControlValue("budgetMax",formatThousands(latest.budgetMax||""));
+    dlg.querySelector('[name="ancillaryIncluded"]').checked=includesAncillaryCost(latest);
+  };
   const updateExistingCustomer=()=>{
     if (existing) return;
     const key=phoneKey(phoneInput.value);
     detectedCustomer=key.length===11 ? buildCustomers().find(customer=>customer.id===key)||null : null;
     if (!detectedCustomer) {
+      autoFilledCustomerId=null;
       existingNotice.hidden=true;
       existingNotice.innerHTML="";
       modalTitle.textContent="고객·상담 추가";
@@ -727,9 +757,13 @@ function openLeadForm(initialPhone="", existing=null) {
       return;
     }
     const latest=detectedCustomer.inquiries[0]||{};
+    if (autoFilledCustomerId!==detectedCustomer.id) {
+      copyLatestVehicleAndBudget(detectedCustomer);
+      autoFilledCustomerId=detectedCustomer.id;
+    }
     existingNotice.hidden=false;
     existingNotice.innerHTML=`
-      <div><span>기존 고객 확인</span><strong>${escapeHtml(detectedCustomer.phone)}</strong><p>최근 상담 ${escapeHtml(detectedCustomer.lastInquiryDate||"-")} · 총 ${fmt(detectedCustomer.inquiries.length)}건 · ${escapeHtml((latest.models||[]).join(", ")||"희망 차종 미입력")} · ${escapeHtml(budgetLabel(latest))}</p></div>
+      <div><span>기존 고객 확인 · 최근 차종과 예산 자동 입력됨</span><strong>${escapeHtml(detectedCustomer.phone)}</strong><p>최근 상담 ${escapeHtml(detectedCustomer.lastInquiryDate||"-")} · 총 ${fmt(detectedCustomer.inquiries.length)}건 · ${escapeHtml((latest.models||[]).join(", ")||"희망 차종 미입력")} · ${escapeHtml(budgetLabel(latest))}</p></div>
       <div class="existing-customer-actions"><button type="button" class="secondary" data-view-customer>기존 기록 보기</button><button type="button" data-copy-latest>최근 상담 불러오기</button></div>`;
     modalTitle.textContent="기존 고객 추가 상담";
     saveButton.textContent="추가 상담 기록 저장";
@@ -763,6 +797,8 @@ function openLeadForm(initialPhone="", existing=null) {
   updateExistingCustomer();
   $("#saveLead").onclick=async(e)=>{
     e.preventDefault();
+    if (saveInProgress) return;
+    dlg.querySelectorAll("[data-model-autocomplete]").forEach(resolveFirstModelMatch);
     const f=new FormData($("#leadForm"));
     const phone=normalizePhone(f.get("phone"));
     if (!validPhone(phone)) { alert("연락처를 010-0000-0000 형식으로 입력해 주세요."); return; }
@@ -784,15 +820,28 @@ function openLeadForm(initialPhone="", existing=null) {
     if (!existing) {
       const signature=value=>JSON.stringify([phoneKey(value.phone),value.inquiryDate||"",value.inquiryType||"",value.models||[],Number(value.budgetMin||0),Number(value.budgetMax||0),value.financeStatus||"",value.visitStatus||"",String(value.conditionRaw||"").trim()]);
       const duplicate=leads.find(item=>signature(item)===signature(row));
-      if (duplicate && !confirm("같은 날짜에 동일한 상담 내용이 이미 있습니다. 그래도 추가하시겠습니까?")) return;
+      if (duplicate) {
+        alert("같은 날짜에 동일한 상담 내용이 이미 저장되어 있습니다. 중복 기록은 추가하지 않았습니다.");
+        return;
+      }
     }
-    if(existing) leads=leads.map(x=>x.id===row.id?row:x); else leads=[row,...leads];
-    await syncUpsert(row);
-    localStorage.setItem(LAST_INQUIRY_DATE_KEY,row.inquiryDate);
-    dlg.close();
-    selectedCustomer=buildCustomers().find(c=>c.id===phoneKey(row.phone))||null;
-    activeTab="customers";
-    render();
+    saveInProgress=true;
+    saveButton.disabled=true;
+    saveButton.textContent="저장 중...";
+    try {
+      if(existing) leads=leads.map(x=>x.id===row.id?row:x); else leads=[row,...leads];
+      await syncUpsert(row);
+      localStorage.setItem(LAST_INQUIRY_DATE_KEY,row.inquiryDate);
+      dlg.close();
+      selectedCustomer=buildCustomers().find(c=>c.id===phoneKey(row.phone))||null;
+      activeTab="customers";
+      render();
+    } catch (error) {
+      saveInProgress=false;
+      saveButton.disabled=false;
+      saveButton.textContent=detectedCustomer ? "추가 상담 기록 저장" : "저장";
+      alert("저장 중 문제가 발생했습니다. 잠시 후 다시 시도해 주세요.");
+    }
   };
   dlg.addEventListener("close",()=>{
     document.body.classList.remove("modal-open");
