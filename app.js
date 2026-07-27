@@ -5,6 +5,7 @@ const ADDITIONAL_APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwzm
 const LOGIN_ENDPOINTS = [FIXED_APPS_SCRIPT_URL, ADDITIONAL_APPS_SCRIPT_URL];
 const SETTINGS_KEY = "jungcar-sheet-sync";
 const SESSION_KEY = "jungcar-session";
+const LAST_INQUIRY_DATE_KEY = "jungcar-last-inquiry-date";
 let leads = [];
 let activeTab = "overview";
 let selectedCustomer = null;
@@ -33,6 +34,11 @@ const formatThousands = (value = "") => {
 };
 const parseFormattedNumber = (value = "") => Number(String(value).replace(/\D/g, "")) || null;
 const parseDate = (value) => /^\d{4}-\d{2}-\d{2}$/.test(value || "") ? new Date(`${value}T00:00:00+09:00`) : null;
+const lastRecordedInquiryDate = () => {
+  const stored=localStorage.getItem(LAST_INQUIRY_DATE_KEY);
+  if (parseDate(stored)) return stored;
+  return leads.map(row=>row.inquiryDate).filter(value=>parseDate(value)).sort().at(-1)||today();
+};
 const dateKey = (date) => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul" }).format(date);
 const monthKey = (date) => dateKey(date).slice(0, 7);
 const monthLabel = (ym) => ym ? `${ym.slice(0,4)}년 ${ym.slice(5,7)}월` : "-";
@@ -651,11 +657,12 @@ function bindModelAutocomplete(root) {
 function openLeadForm(initialPhone="", existing=null) {
   const r=existing||{};
   const models=(r.models||[]);
+  const defaultInquiryDate=existing ? r.inquiryDate : initialPhone ? today() : lastRecordedInquiryDate();
   const inquiryTypeChoices=uniq([r.inquiryType,"구매","판매","판매 후 구매","할부/한도","방문 일정","수리/보증","기타/문의"]);
   const html=`<dialog class="modal lead-modal" aria-labelledby="leadModalTitle"><form method="dialog" id="leadForm">
     <div class="modal-head"><div><span>${existing ? "CONSULTATION EDIT" : "NEW CONSULTATION"}</span><h2 id="leadModalTitle">${existing?"상담 내역 수정":"고객·상담 추가"}</h2></div><button type="button" class="icon-button" data-close-modal aria-label="닫기">×</button></div>
     <section class="form-section"><h3>기본 정보</h3><div class="form-grid">
-      ${formField("문의 날짜", `<input name="inquiryDate" type="date" value="${r.inquiryDate||today()}" required>`)}
+      ${formField("문의 날짜", `<input name="inquiryDate" type="date" value="${defaultInquiryDate}" required>`)}
       ${formField("연락처", `<input name="phone" inputmode="numeric" autocomplete="tel" maxlength="13" placeholder="010-0000-0000" value="${escapeHtml(formatPhoneInput(initialPhone||r.phone||""))}" required>`)}
       ${formField("문의 종류", `<select name="inquiryType" required>${inquiryTypeChoices.map(value=>`<option value="${escapeHtml(value)}" ${selected(r.inquiryType||"구매",value)}>${escapeHtml(value)}</option>`).join("")}</select>`)}
     </div></section>
@@ -781,6 +788,7 @@ function openLeadForm(initialPhone="", existing=null) {
     }
     if(existing) leads=leads.map(x=>x.id===row.id?row:x); else leads=[row,...leads];
     await syncUpsert(row);
+    localStorage.setItem(LAST_INQUIRY_DATE_KEY,row.inquiryDate);
     dlg.close();
     selectedCustomer=buildCustomers().find(c=>c.id===phoneKey(row.phone))||null;
     activeTab="customers";
