@@ -792,6 +792,7 @@ function openLeadForm(initialPhone="", existing=null) {
       dlg.querySelector('[name="budgetMax"]').value=formatThousands(inferred.max);
     }
     if (conditionInput.value.includes("할부")) dlg.querySelector('[name="financeStatus"]').checked=true;
+    if (conditionInput.value.includes("방문")) dlg.querySelector('[name="visitStatus"]').checked=true;
   });
   updateExistingCustomer();
   $("#saveLead").onclick=async(e)=>{
@@ -812,7 +813,7 @@ function openLeadForm(initialPhone="", existing=null) {
     if (budgetMin && budgetMax && budgetMin > budgetMax) { alert("최소 예산은 최대 예산보다 클 수 없습니다."); return; }
     const inquiryType=String(f.get("inquiryType")||"구매").trim();
     const financeStatus=conditionRaw.includes("할부") || f.get("financeStatus")==="on" ? "예" : "아니오";
-    const visitStatus=f.get("visitStatus")==="on" ? "예" : "아니오";
+    const visitStatus=conditionRaw.includes("방문") || f.get("visitStatus")==="on" ? "예" : "아니오";
     const ancillaryIncluded=f.get("ancillaryIncluded")==="on";
     const topics=uniq([...(r.topics||[]).filter(t=>t && t!=="부대비용 포함"),...topicsFromText(conditionRaw,inquiryType,financeStatus),...(ancillaryIncluded?["부대비용 포함"]:[])]);
     const row={...r,id:r.id||`local-${Date.now()}`,source:"manual",inquiryDate:f.get("inquiryDate"),phone,inquiryChannel:r.inquiryChannel||"",inquiryType,models:[f.get("model1"),f.get("model2"),f.get("model3")].map(s=>String(s||"").trim()).filter(Boolean),budgetMin,budgetMax,budgetRaw:[budgetMin,budgetMax].filter(Boolean).join("~"),budgetBucket:"표현형",purchaseTiming:String(f.get("purchaseTiming")||"").trim(),financeStatus,visitStatus,staffName:r.staffName||"",leadSource:r.leadSource||"",callOutcome:r.callOutcome||"",followUpDate:r.followUpDate||"",conditionRaw,topics};
@@ -849,5 +850,24 @@ function openLeadForm(initialPhone="", existing=null) {
 }
 function exportCsv() { const csv=["문의 날짜,연락처,문의 종류,희망 차량 1,희망 차량 2,희망 차량 3,최소 예산,최대 예산,부대비용 포함,구매 예정일,할부 여부,방문 여부,희망 조건",...leads.map(r=>[r.inquiryDate,r.phone,r.inquiryType,...[0,1,2].map(i=>(r.models||[])[i]||""),r.budgetMin,r.budgetMax,includesAncillaryCost(r)?"예":"아니오",r.purchaseTiming,r.financeStatus,r.visitStatus,r.conditionRaw].map(v=>`"${String(v||"").replaceAll('"','""')}"`).join(","))].join("\n"); const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob(["\ufeff",csv],{type:"text/csv;charset=utf-8"})); a.download=`jungcar-db-${today()}.csv`; a.click(); URL.revokeObjectURL(a.href); }
 function escapeHtml(v) { return String(v ?? "").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c])); }
+document.addEventListener("keydown", event => {
+  if (event.isComposing || event.repeat) return;
+  const leadDialog=document.querySelector("dialog.lead-modal[open]");
+  if (event.key==="Escape" && leadDialog) {
+    event.preventDefault();
+    leadDialog.close();
+    return;
+  }
+  if (event.code==="KeyS" && event.ctrlKey && !event.metaKey && leadDialog) {
+    event.preventDefault();
+    const saveButton=leadDialog.querySelector("#saveLead");
+    if (saveButton && !saveButton.disabled) saveButton.click();
+    return;
+  }
+  if (event.code==="KeyN" && event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey && !leadDialog && isLoggedIn()) {
+    event.preventDefault();
+    openLeadForm();
+  }
+});
 $$("[data-tab]").forEach(btn => btn.onclick = () => { activeTab = btn.dataset.tab; selectedCustomer = null; render(); });
 loadData();
