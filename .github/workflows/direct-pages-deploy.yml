@@ -1,0 +1,78 @@
+name: Deploy Pages directly
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+    steps:
+      - name: Deploy existing Pages artifact through the API
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_ID: "8971334919"
+          BUILD_VERSION: "e452a9252cbe90dbb1ab905906a9964cb368b697"
+        run: |
+          set -euo pipefail
+
+          oidc_response="$(curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}")"
+          oidc_token="$(jq -er '.value' <<< "${oidc_response}")"
+
+          payload="$(jq -n \
+            --argjson artifact_id "${ARTIFACT_ID}" \
+            --arg pages_build_version "${BUILD_VERSION}" \
+            --arg oidc_token "${oidc_token}" \
+            '{artifact_id: $artifact_id, pages_build_version: $pages_build_version, oidc_token: $oidc_token}')"
+
+          deployment_response="$(curl --fail-with-body --silent --show-error \
+            --request POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            -H "Content-Type: application/json" \
+            --data "${payload}" \
+            "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/pages/deployments")"
+
+          deployment_id="$(jq -er '.id // (.status_url | split("/") | last)' <<< "${deployment_response}")"
+          page_url="$(jq -r '.page_url // empty' <<< "${deployment_response}")"
+          printf 'Pages deployment created: %s %s\n' "${deployment_id}" "${page_url}"
+
+          for attempt in {1..120}; do
+            status_response="$(curl --fail-with-body --silent --show-error \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/pages/deployments/${deployment_id}")"
+            status="$(jq -er '.status' <<< "${status_response}")"
+            printf 'Pages deployment status: %s\n' "${status}"
+
+            case "${status}" in
+              succeed)
+                exit 0
+                ;;
+              deployment_failed|deployment_content_failed|deployment_cancelled|deployment_lost)
+                jq . <<< "${status_response}"
+                exit 1
+                ;;
+            esac
+
+            sleep 5
+          done
+
+          echo "Pages deployment did not finish within 10 minutes."
+          exit 1
