@@ -858,13 +858,13 @@ document.addEventListener("keydown", event => {
     leadDialog.close();
     return;
   }
-  if (event.code==="KeyS" && event.ctrlKey && !event.metaKey && leadDialog) {
+  if (event.code==="KeyS" && event.metaKey && !event.ctrlKey && leadDialog) {
     event.preventDefault();
     const saveButton=leadDialog.querySelector("#saveLead");
     if (saveButton && !saveButton.disabled) saveButton.click();
     return;
   }
-  if (event.code==="KeyN" && event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey && !leadDialog && isLoggedIn()) {
+  if (event.code==="KeyN" && event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && !leadDialog && isLoggedIn()) {
     event.preventDefault();
     openLeadForm();
   }
