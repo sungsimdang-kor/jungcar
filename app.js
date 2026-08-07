@@ -1,8 +1,7 @@
 
 const SHEET_HEADERS = ["사이트ID","문의 날짜","연락처","문의 타입","문의 종류","희망 차량_1","희망 차량_2","희망 차량_3","최소 예산","최대 예산","구매 예정일","할부 여부","방문 여부","담당자","문의 주제","유입 경로","상담 결과","후속 연락일","희망 조건","수정일시"];
-const FIXED_APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzLkvPc0LutnFOszyKJd0VYlaU13IAz21PBbWISynrKO7UGfbcY5bp4ClU5lphabAx4/exec";
-const ADDITIONAL_APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwzmFAtSNUX9CB7BKELlcM95M76CuojmA8szFAlf9umhv1POGW1VC4QcA6ztltByEBy/exec";
-const LOGIN_ENDPOINTS = [FIXED_APPS_SCRIPT_URL, ADDITIONAL_APPS_SCRIPT_URL];
+const FIXED_APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwzmFAtSNUX9CB7BKELlcM95M76CuojmA8szFAlf9umhv1POGW1VC4QcA6ztltByEBy/exec";
+const LOGIN_USERNAME = "배찬오";
 const SETTINGS_KEY = "jungcar-sheet-sync";
 const SESSION_KEY = "jungcar-session";
 const LAST_INQUIRY_DATE_KEY = "jungcar-last-inquiry-date";
@@ -111,7 +110,7 @@ const topicsFromText = (conditionRaw = "", inquiryType = "", financeStatus = "")
   ];
   return rules.filter(([, words]) => words.some(word => raw.includes(word.toLowerCase()))).map(([label]) => label);
 };
-const getSettings = () => ({ autoPush: true, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}"), endpoint: session?.endpoint || FIXED_APPS_SCRIPT_URL });
+const getSettings = () => ({ autoPush: true, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}"), endpoint: FIXED_APPS_SCRIPT_URL });
 const saveSettings = (settings) => localStorage.setItem(SETTINGS_KEY, JSON.stringify({ endpoint: FIXED_APPS_SCRIPT_URL, autoPush: settings.autoPush !== false }));
 const isLoggedIn = () => Boolean(session?.sessionToken && getSettings().endpoint);
 
@@ -214,7 +213,6 @@ function renderLogin(message = "") {
         <img class="login-logo" src="https://xn--tv-9z9j31p.com/assets/admin/images/logo/171/logo.png" alt="중카TV">
       </div>
       <form id="loginForm">
-        <label>아이디<input name="username" autocomplete="username" required></label>
         <label>비밀번호<input name="password" type="password" autocomplete="current-password" required></label>
         <button type="submit">로그인</button>
         <p class="status">${escapeHtml(message)}</p>
@@ -227,26 +225,21 @@ async function login(event) {
   event.preventDefault();
   const form = new FormData(event.currentTarget);
   const credentials = {
-    username: String(form.get("username") || ""),
+    username: LOGIN_USERNAME,
     password: String(form.get("password") || ""),
   };
-  let lastError;
-  for (const endpoint of LOGIN_ENDPOINTS) {
-    try {
-      const result = await sheetJsonp("login", { ...credentials, endpoint });
-      session = { sessionToken: result.sessionToken, endpoint, loggedInAt: Date.now() };
-      localStorage.setItem(SESSION_KEY, JSON.stringify(session));
-      leads = await sheetList(false);
-      activeTab = "overview";
-      render();
-      return;
-    } catch (err) {
-      lastError = err;
-    }
+  try {
+    const result = await sheetJsonp("login", credentials);
+    session = { sessionToken: result.sessionToken, endpoint: FIXED_APPS_SCRIPT_URL, loggedInAt: Date.now() };
+    localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+    leads = await sheetList(false);
+    activeTab = "overview";
+    render();
+  } catch (err) {
+    session = null;
+    localStorage.removeItem(SESSION_KEY);
+    renderLogin(err?.message || "로그인하지 못했습니다.");
   }
-  session = null;
-  localStorage.removeItem(SESSION_KEY);
-  renderLogin(lastError?.message || "로그인하지 못했습니다.");
 }
 
 function logout() {
