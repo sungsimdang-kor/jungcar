@@ -171,7 +171,6 @@ function buildCustomers(rows = leads) {
     const sorted = items.slice().sort((a,b) => (b.inquiryDate || "").localeCompare(a.inquiryDate || ""));
     const latest = sorted[0];
     const dates = sorted.map(r => r.inquiryDate).filter(Boolean).sort();
-    const lastSavedOrder = Math.max(...items.map(r => Number(r.clientSavedAt) || Number(r.sourceRow) || 0));
     return {
       id,
       phone: normalizePhone(latest.phone || "번호없음"),
@@ -183,9 +182,8 @@ function buildCustomers(rows = leads) {
       visitStatus: items.some(r => r.visitStatus === "예") ? "예" : latest.visitStatus || "미확인",
       latestCondition: latest.conditionRaw || "",
       inquiries: sorted,
-      lastSavedOrder,
     };
-  }).sort((a,b) => b.lastSavedOrder - a.lastSavedOrder || (b.lastInquiryDate || "").localeCompare(a.lastInquiryDate || ""));
+  }).sort((a,b) => (b.lastInquiryDate || "").localeCompare(a.lastInquiryDate || ""));
 }
 
 function render() {
@@ -818,7 +816,7 @@ function openLeadForm(initialPhone="", existing=null) {
     const visitStatus=conditionRaw.includes("방문") || f.get("visitStatus")==="on" ? "예" : "아니오";
     const ancillaryIncluded=f.get("ancillaryIncluded")==="on";
     const topics=uniq([...(r.topics||[]).filter(t=>t && t!=="부대비용 포함"),...topicsFromText(conditionRaw,inquiryType,financeStatus),...(ancillaryIncluded?["부대비용 포함"]:[])]);
-    const row={...r,id:r.id||`local-${Date.now()}`,source:"manual",inquiryDate:f.get("inquiryDate"),phone,inquiryChannel:r.inquiryChannel||"",inquiryType,models:[f.get("model1"),f.get("model2"),f.get("model3")].map(s=>String(s||"").trim()).filter(Boolean),budgetMin,budgetMax,budgetRaw:[budgetMin,budgetMax].filter(Boolean).join("~"),budgetBucket:"표현형",purchaseTiming:String(f.get("purchaseTiming")||"").trim(),financeStatus,visitStatus,staffName:r.staffName||"",leadSource:r.leadSource||"",callOutcome:r.callOutcome||"",followUpDate:r.followUpDate||"",conditionRaw,topics,clientSavedAt:Date.now()};
+    const row={...r,id:r.id||`local-${Date.now()}`,source:"manual",inquiryDate:f.get("inquiryDate"),phone,inquiryChannel:r.inquiryChannel||"",inquiryType,models:[f.get("model1"),f.get("model2"),f.get("model3")].map(s=>String(s||"").trim()).filter(Boolean),budgetMin,budgetMax,budgetRaw:[budgetMin,budgetMax].filter(Boolean).join("~"),budgetBucket:"표현형",purchaseTiming:String(f.get("purchaseTiming")||"").trim(),financeStatus,visitStatus,staffName:r.staffName||"",leadSource:r.leadSource||"",callOutcome:r.callOutcome||"",followUpDate:r.followUpDate||"",conditionRaw,topics};
     if (!existing) {
       const signature=value=>JSON.stringify([phoneKey(value.phone),value.inquiryDate||"",value.inquiryType||"",value.models||[],Number(value.budgetMin||0),Number(value.budgetMax||0),value.financeStatus||"",value.visitStatus||"",String(value.conditionRaw||"").trim()]);
       const duplicate=leads.find(item=>signature(item)===signature(row));
