@@ -10,6 +10,8 @@ let activeTab = "overview";
 let selectedCustomer = null;
 let session = JSON.parse(localStorage.getItem(SESSION_KEY) || "null");
 let analysisFilters = {};
+let loginInProgress = false;
+let dataLoading = false;
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
@@ -149,13 +151,19 @@ function saveLocal() {
 
 async function loadData() {
   if (isLoggedIn()) {
+    dataLoading = true;
+    render();
     try {
       leads = await sheetList(false);
-    } catch {
+    } catch (error) {
       session = null;
       localStorage.removeItem(SESSION_KEY);
       leads = [];
+      dataLoading = false;
+      renderLogin(error?.message || "고객 데이터를 불러오지 못했습니다. 다시 로그인해 주세요.");
+      return;
     }
+    dataLoading = false;
   }
   render();
 }
@@ -187,6 +195,10 @@ function buildCustomers(rows = leads) {
 }
 
 function render() {
+  if (loginInProgress || dataLoading) {
+    renderLogin("고객 데이터를 불러오는 중입니다. 잠시만 기다려 주세요.", true);
+    return;
+  }
   if (!isLoggedIn()) {
     renderLogin();
     return;
@@ -202,7 +214,7 @@ function render() {
   if (activeTab === "settings") renderSettings();
 }
 
-function renderLogin(message = "") {
+function renderLogin(message = "", busy = false) {
   $(".top").classList.add("login-top");
   $(".page-title").textContent = "";
   if ($(".total-count")) $(".total-count").textContent = "보호됨";
@@ -212,17 +224,24 @@ function renderLogin(message = "") {
       <div class="login-brand">
         <img class="login-logo" src="https://xn--tv-9z9j31p.com/assets/admin/images/logo/171/logo.png" alt="중카TV">
       </div>
-      <form id="loginForm">
-        <label>비밀번호<input name="password" type="password" autocomplete="current-password" required></label>
-        <button type="submit">로그인</button>
+      <form id="loginForm" aria-busy="${busy}">
+        <label>비밀번호<input name="password" type="password" autocomplete="current-password" required ${busy ? "disabled" : ""}></label>
+        <button type="submit" ${busy ? "disabled" : ""}>${busy ? "불러오는 중..." : "로그인"}</button>
         <p class="status">${escapeHtml(message)}</p>
       </form>
     </section>`;
-  $("#loginForm").onsubmit = login;
+  $("#loginForm").onsubmit = busy ? event => event.preventDefault() : login;
 }
 
 async function login(event) {
   event.preventDefault();
+  if (loginInProgress) return;
+  loginInProgress = true;
+  const submitButton = event.currentTarget.querySelector('button[type="submit"]');
+  const status = event.currentTarget.querySelector(".status");
+  submitButton.disabled = true;
+  submitButton.textContent = "확인 중...";
+  status.textContent = "로그인을 확인하는 중입니다.";
   const form = new FormData(event.currentTarget);
   const credentials = {
     username: LOGIN_USERNAME,
@@ -231,11 +250,14 @@ async function login(event) {
   try {
     const result = await sheetJsonp("login", credentials);
     session = { sessionToken: result.sessionToken, endpoint: FIXED_APPS_SCRIPT_URL, loggedInAt: Date.now() };
-    localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+    status.textContent = "로그인되었습니다. 고객 데이터를 불러오는 중입니다.";
     leads = await sheetList(false);
+    localStorage.setItem(SESSION_KEY, JSON.stringify(session));
     activeTab = "overview";
+    loginInProgress = false;
     render();
   } catch (err) {
+    loginInProgress = false;
     session = null;
     localStorage.removeItem(SESSION_KEY);
     renderLogin(err?.message || "로그인하지 못했습니다.");
@@ -450,7 +472,8 @@ function sheetJsonp(action, payload = {}) {
     if (payload.row) url.searchParams.set("row", JSON.stringify(payload.row));
     if (payload.siteId) url.searchParams.set("siteId", payload.siteId);
     const script = document.createElement("script");
-    const timeout = setTimeout(() => { cleanup(); reject(new Error("구글시트 응답 시간이 초과되었습니다.")); }, 20000);
+    const timeoutMs = action === "list" ? 90000 : 60000;
+    const timeout = setTimeout(() => { cleanup(); reject(new Error("구글시트 응답 시간이 초과되었습니다.")); }, timeoutMs);
     function cleanup() { clearTimeout(timeout); delete window[callback]; script.remove(); }
     window[callback] = (data) => { cleanup(); data?.ok === false ? reject(new Error(data.error || "구글시트 요청 실패")) : resolve(data); };
     script.onerror = () => { cleanup(); reject(new Error("Apps Script URL을 불러오지 못했습니다.")); };
@@ -469,7 +492,18 @@ async function sheetPost(action, payload = {}) {
 }
 
 async function sheetList(showStatus=false) {
-  const data = await sheetJsonp("list");
+  let data;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      data = await sheetJsonp("list");
+      break;
+    } catch (error) {
+      const retryable = /시간이 초과|불러오지 못했습니다/.test(error?.message || "");
+      if (!retryable || attempt === 1) throw error;
+      await new Promise(resolve => setTimeout(resolve, 700));
+    }
+  }
+  if (!Array.isArray(data?.rows)) throw new Error("구글시트 고객 데이터 형식이 올바르지 않습니다.");
   if (showStatus) $("#syncStatus").textContent = `연결 성공 · 시트 ${fmt(data.rows?.length || 0)}건`;
   return data.rows || [];
 }
@@ -869,5 +903,10 @@ document.addEventListener("keydown", event => {
     openLeadForm();
   }
 });
-$$("[data-tab]").forEach(btn => btn.onclick = () => { activeTab = btn.dataset.tab; selectedCustomer = null; render(); });
+$$("[data-tab]").forEach(btn => btn.onclick = () => {
+  if (!isLoggedIn() || loginInProgress || dataLoading) return;
+  activeTab = btn.dataset.tab;
+  selectedCustomer = null;
+  render();
+});
 loadData();
