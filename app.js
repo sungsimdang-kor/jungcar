@@ -884,6 +884,7 @@ function openLeadForm(initialPhone="", existing=null) {
 }
 function exportCsv() { const csv=["문의 날짜,연락처,문의 종류,희망 차량 1,희망 차량 2,희망 차량 3,최소 예산,최대 예산,부대비용 포함,구매 예정일,할부 여부,방문 여부,희망 조건",...leads.map(r=>[r.inquiryDate,r.phone,r.inquiryType,...[0,1,2].map(i=>(r.models||[])[i]||""),r.budgetMin,r.budgetMax,includesAncillaryCost(r)?"예":"아니오",r.purchaseTiming,r.financeStatus,r.visitStatus,r.conditionRaw].map(v=>`"${String(v||"").replaceAll('"','""')}"`).join(","))].join("\n"); const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob(["\ufeff",csv],{type:"text/csv;charset=utf-8"})); a.download=`jungcar-db-${today()}.csv`; a.click(); URL.revokeObjectURL(a.href); }
 function escapeHtml(v) { return String(v ?? "").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c])); }
+const isTextEntryTarget = target => target instanceof HTMLElement && (target.matches("input, textarea, select") || target.isContentEditable);
 document.addEventListener("keydown", event => {
   if (event.isComposing || event.repeat) return;
   const leadDialog=document.querySelector("dialog.lead-modal[open]");
@@ -892,13 +893,13 @@ document.addEventListener("keydown", event => {
     leadDialog.close();
     return;
   }
-  if (event.code==="KeyS" && event.metaKey && !event.ctrlKey && leadDialog) {
+  if (event.code==="KeyS" && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && leadDialog && !isTextEntryTarget(event.target)) {
     event.preventDefault();
     const saveButton=leadDialog.querySelector("#saveLead");
     if (saveButton && !saveButton.disabled) saveButton.click();
     return;
   }
-  if (event.code==="KeyN" && event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && !leadDialog && isLoggedIn()) {
+  if (event.code==="KeyN" && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && !leadDialog && !isTextEntryTarget(event.target) && !loginInProgress && !dataLoading && isLoggedIn()) {
     event.preventDefault();
     openLeadForm();
   }
