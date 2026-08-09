@@ -23,8 +23,8 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          ARTIFACT_ID: "9020900249"
-          BUILD_VERSION: "e62e3ea6aad4522ed098dc0809361d7b1876b712"
+          ARTIFACT_ID: "9030078537"
+          BUILD_VERSION: "cd2f1a2f2b48db623f4f5ba0e94c51a80bf124ba"
         run: |
           set -euo pipefail
 
