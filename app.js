@@ -12,6 +12,7 @@ let session = JSON.parse(localStorage.getItem(SESSION_KEY) || "null");
 let analysisFilters = {};
 let loginInProgress = false;
 let dataLoading = false;
+let htmlToImagePromise = null;
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
@@ -195,6 +196,7 @@ function buildCustomers(rows = leads) {
 }
 
 function render() {
+  document.body.classList.toggle("analysis-view", !loginInProgress && !dataLoading && isLoggedIn() && activeTab === "analysis");
   if (loginInProgress || dataLoading) {
     renderLogin("고객 데이터를 불러오는 중입니다. 잠시만 기다려 주세요.", true);
     return;
@@ -346,7 +348,7 @@ function renderAnalysis() {
   const option = (label, key, values) => `<label>${label}<select name="${key}"><option value="">전체</option>${uniq(values).sort().map(v => `<option value="${escapeHtml(v)}" ${selected(analysisFilters[key] || "", v)}>${escapeHtml(v)}</option>`).join("")}</select></label>`;
   app.innerHTML = `
     <section class="analysis-filter panel">
-      <div class="filter-heading"><div><h2>분석 조건</h2><p>검색어나 조건을 바꾸면 아래 모든 지표와 차트가 함께 변경됩니다.</p></div><button type="button" id="resetAnalysis">초기화</button></div>
+      <div class="filter-heading"><div><h2>분석 조건</h2><p>검색어나 조건을 바꾸면 아래 모든 지표와 차트가 함께 변경됩니다.</p></div><div class="filter-actions"><button type="button" id="resetAnalysis">초기화</button><button type="button" id="exportAnalysisPng">PNG 이미지 저장</button><button type="button" id="printAnalysis">PDF 저장/인쇄</button></div></div>
       <form id="analysisForm" class="filter-grid">
         <label class="filter-search">통합 검색<input name="search" value="${escapeHtml(analysisFilters.search || "")}" placeholder="전화번호·차종·조건·문의 내용 검색"></label>
         <label>시작일<input name="dateFrom" type="date" value="${escapeHtml(analysisFilters.dateFrom || "")}"></label>
@@ -365,7 +367,94 @@ function renderAnalysis() {
     renderAnalysisResults();
   });
   $("#resetAnalysis").onclick = () => { analysisFilters = {}; renderAnalysis(); };
+  $("#exportAnalysisPng").onclick = exportAnalysisPng;
+  $("#printAnalysis").onclick = printAnalysisReport;
   renderAnalysisResults();
+}
+
+function analysisFilterSummary() {
+  const f = analysisFilters;
+  const items = [];
+  if (f.search) items.push(`검색: ${f.search}`);
+  if (f.dateFrom || f.dateTo) items.push(`기간: ${f.dateFrom || "전체"} ~ ${f.dateTo || "전체"}`);
+  if (f.inquiryType) items.push(`문의 종류: ${f.inquiryType}`);
+  if (f.model) items.push(`희망 차종: ${f.model}`);
+  if (f.financeStatus) items.push(`할부: ${f.financeStatus}`);
+  if (f.visitStatus) items.push(`방문: ${f.visitStatus}`);
+  if (f.budgetMin || f.budgetMax) items.push(`예산: ${f.budgetMin || "0"} ~ ${f.budgetMax || "제한 없음"}만원`);
+  return items.length ? items.join(" · ") : "전체 고객 데이터";
+}
+
+function reportGeneratedAt() {
+  return new Intl.DateTimeFormat("ko-KR", {
+    dateStyle: "long",
+    timeStyle: "short",
+    timeZone: "Asia/Seoul",
+  }).format(new Date());
+}
+
+function printAnalysisReport() {
+  if (!$("#analysisReport")) return;
+  const previousTitle = document.title;
+  let cleaned = false;
+  const cleanup = () => {
+    if (cleaned) return;
+    cleaned = true;
+    document.body.classList.remove("analysis-printing");
+    document.title = previousTitle;
+  };
+  document.body.classList.add("analysis-printing");
+  document.title = `중카TV_고객분석_${today()}`;
+  window.addEventListener("afterprint", cleanup, { once:true });
+  setTimeout(cleanup, 120000);
+  requestAnimationFrame(() => window.print());
+}
+
+function loadHtmlToImage() {
+  if (window.htmlToImage) return Promise.resolve(window.htmlToImage);
+  if (htmlToImagePromise) return htmlToImagePromise;
+  htmlToImagePromise = new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/dist/html-to-image.js";
+    script.onload = () => window.htmlToImage ? resolve(window.htmlToImage) : reject(new Error("이미지 변환 도구를 불러오지 못했습니다."));
+    script.onerror = () => reject(new Error("이미지 변환 도구를 불러오지 못했습니다."));
+    document.head.appendChild(script);
+  }).catch(error => {
+    htmlToImagePromise = null;
+    throw error;
+  });
+  return htmlToImagePromise;
+}
+
+async function exportAnalysisPng() {
+  const report = $("#analysisReport");
+  const button = $("#exportAnalysisPng");
+  if (!report || !button || button.disabled) return;
+  const originalText = button.textContent;
+  button.disabled = true;
+  button.textContent = "이미지 만드는 중...";
+  report.classList.add("exporting");
+  try {
+    if (document.fonts?.ready) await document.fonts.ready;
+    const htmlToImage = await loadHtmlToImage();
+    const dataUrl = await htmlToImage.toPng(report, {
+      backgroundColor: "#f5f7fb",
+      cacheBust: true,
+      pixelRatio: 2,
+      width: report.scrollWidth,
+      height: report.scrollHeight,
+    });
+    const link = document.createElement("a");
+    link.download = `jungcar-analysis-${today()}.png`;
+    link.href = dataUrl;
+    link.click();
+  } catch (error) {
+    alert(error?.message || "PNG 이미지를 만들지 못했습니다. PDF 저장/인쇄를 이용해 주세요.");
+  } finally {
+    report.classList.remove("exporting");
+    button.disabled = false;
+    button.textContent = originalText;
+  }
 }
 
 function filteredAnalysisRows() {
@@ -374,7 +463,7 @@ function filteredAnalysisRows() {
   return leads.filter(r => {
     const searchable = [
       r.inquiryDate, r.phone, r.inquiryType, ...(r.models || []),
-      r.budgetMin, r.budgetMax, r.purchaseTiming, r.financeStatus, r.visitStatus,
+      r.budgetMin, r.budgetMax, r.financeStatus, r.visitStatus,
       r.conditionRaw,
     ].join(" ").toLowerCase();
     if (term && !searchable.includes(term)) return false;
@@ -399,27 +488,31 @@ function renderAnalysisResults() {
   const byBudget = count(rows.map(budgetBand));
   const byFinance = count(rows.map(r => r.financeStatus || "미확인"));
   const byVisit = count(rows.map(r => r.visitStatus || "미확인"));
-  const byTiming = count(rows.map(r => r.purchaseTiming || "미입력"));
   const byWeekday = count(dated.map(r => weekdayLabels[parseDate(r.inquiryDate).getDay()]));
   const orderedWeekdays = weekdayLabels.slice(1).concat(weekdayLabels[0]).map(day => [day, byWeekday[day] || 0]);
   const budgetRows = rows.filter(r => r.budgetMin || r.budgetMax);
   const averageBudget = budgetRows.length ? Math.round(budgetRows.reduce((sum, r) => sum + Number(r.budgetMax || r.budgetMin || 0), 0) / budgetRows.length) : 0;
   $("#analysisResults").innerHTML = `
-    <section class="kpis analysis-kpis">
-      ${kpi("필터 결과", `${fmt(rows.length)}건`, `전체 ${fmt(leads.length)}건 중`)}
-      ${kpi("고객 수", `${fmt(buildCustomers(rows).length)}명`, "전화번호 기준")}
-      ${kpi("가장 많은 문의 차종", topEntries(byModel,1)[0]?.[0] || "-", `${fmt(topEntries(byModel,1)[0]?.[1] || 0)}건`)}
-      ${kpi("평균 최대 예산", averageBudget ? `${fmt(averageBudget)}만원` : "-", `예산 입력 ${fmt(budgetRows.length)}건 기준`)}
-    </section>
-    <section class="grid analysis-grid">
-      ${card("기간별 상담 현황", "문의일 기준", verticalBars(Object.entries(byDate).sort()), "wide")}
-      ${card("상담이 많은 요일", "월요일부터 일요일까지", bars(orderedWeekdays))}
-      ${card("문의 종류", "상담 목적 분포", donut(topEntries(byType,10), true), "chart")}
-      ${card("희망 차종", "복수 차종 각각 집계", bars(topEntries(byModel,12)))}
-      ${card("예산 분포", "최대 예산 기준", bars(Object.entries(byBudget)))}
-      ${card("할부 여부", "할부 문의 현황", bars(topEntries(byFinance,8)))}
-      ${card("방문 여부", "방문·예약 현황", bars(topEntries(byVisit,8)))}
-      ${card("구매 예정일", "구매 시점 분포", bars(topEntries(byTiming,10)))}
+    <section id="analysisReport" class="analysis-report">
+      <header class="analysis-report-header">
+        <div><span>JUNGCAR CRM REPORT</span><h2>고객 문의 분석 보고서</h2><p>${escapeHtml(reportGeneratedAt())} 생성</p></div>
+        <div class="analysis-report-filters"><strong>적용 조건</strong><p>${escapeHtml(analysisFilterSummary())}</p></div>
+      </header>
+      <section class="kpis analysis-kpis">
+        ${kpi("필터 결과", `${fmt(rows.length)}건`, `전체 ${fmt(leads.length)}건 중`)}
+        ${kpi("고객 수", `${fmt(buildCustomers(rows).length)}명`, "전화번호 기준")}
+        ${kpi("가장 많은 문의 차종", topEntries(byModel,1)[0]?.[0] || "-", `${fmt(topEntries(byModel,1)[0]?.[1] || 0)}건`)}
+        ${kpi("평균 최대 예산", averageBudget ? `${fmt(averageBudget)}만원` : "-", `예산 입력 ${fmt(budgetRows.length)}건 기준`)}
+      </section>
+      <section class="grid analysis-grid">
+        ${card("기간별 상담 현황", "문의일 기준", verticalBars(Object.entries(byDate).sort()), "wide")}
+        ${card("상담이 많은 요일", "월요일부터 일요일까지", bars(orderedWeekdays))}
+        ${card("문의 종류", "상담 목적 분포", donut(topEntries(byType,10), true), "chart")}
+        ${card("희망 차종", "복수 차종 각각 집계", bars(topEntries(byModel,12)))}
+        ${card("예산 분포", "최대 예산 기준", bars(Object.entries(byBudget)))}
+        ${card("할부 여부", "할부 문의 현황", bars(topEntries(byFinance,8)))}
+        ${card("방문 여부", "방문·예약 현황", bars(topEntries(byVisit,8)))}
+      </section>
     </section>`;
 }
 
