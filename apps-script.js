@@ -124,7 +124,7 @@ function siteIdMap(sheet) {
 }
 
 function toValues(row) {
-  return [row.siteId || "", row.inquiryDate || "", row.phone || "", row.inquiryChannel || "전화", row.inquiryType || "구매", row.model1 || "", row.model2 || "", row.model3 || "", row.budgetMin || "", row.budgetMax || "", row.purchaseTiming || "", row.financeStatus || "미확인", row.visitStatus || "미확인", row.staffName || "", row.topics || "", row.leadSource || "대표번호", row.callOutcome || "상담완료", row.followUpDate || "", row.conditionRaw || "", new Date()];
+  return [row.siteId || "", row.inquiryDate || "", row.phone || "", row.inquiryChannel || "전화", row.inquiryType || "구매", row.model1 || "", row.model2 || "", row.model3 || "", "", row.budgetMax || row.budgetMin || "", row.purchaseTiming || "", row.financeStatus || "미확인", row.visitStatus || "미확인", row.staffName || "", row.topics || "", row.leadSource || "대표번호", row.callOutcome || "상담완료", row.followUpDate || "", row.conditionRaw || "", new Date()];
 }
 
 function toObject(headers, row, sourceRow) {
@@ -137,9 +137,9 @@ function toObject(headers, row, sourceRow) {
     inquiryChannel: get("문의 타입") || "전화",
     inquiryType: get("문의 종류") || "구매",
     models: [get("희망 차량_1"), get("희망 차량_2"), get("희망 차량_3")].filter(Boolean),
-    budgetMin: Number(get("최소 예산")) || null,
-    budgetMax: Number(get("최대 예산")) || null,
-    budgetRaw: [get("최소 예산"), get("최대 예산")].filter(Boolean).join("~"),
+    budgetMin: null,
+    budgetMax: Number(get("최대 예산") || get("최소 예산")) || null,
+    budgetRaw: String(get("최대 예산") || get("최소 예산") || ""),
     purchaseTiming: get("구매 예정일"),
     financeStatus: get("할부 여부") || "미확인",
     visitStatus: get("방문 여부") || "미확인",
