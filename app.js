@@ -1,5 +1,4 @@
 
-const SHEET_HEADERS = ["사이트ID","문의 날짜","연락처","문의 타입","문의 종류","희망 차량_1","희망 차량_2","희망 차량_3","최소 예산","최대 예산","구매 예정일","할부 여부","방문 여부","담당자","문의 주제","유입 경로","상담 결과","후속 연락일","희망 조건","수정일시"];
 const FIXED_APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwzmFAtSNUX9CB7BKELlcM95M76CuojmA8szFAlf9umhv1POGW1VC4QcA6ztltByEBy/exec";
 const LOGIN_USERNAME = "배찬오";
 const SETTINGS_KEY = "jungcar-sheet-sync";
@@ -68,10 +67,7 @@ MODEL_CATALOG["\uae30\uc544"].splice(27, 0, "\ubd09\uace03");
 
 const CAR_MODELS = Object.entries({...MODEL_CATALOG, ...FOREIGN_MODEL_CATALOG}).flatMap(([maker, models]) => models.map(name => ({ maker, name })));
 const budgetLabel = (row) => {
-  const min = row.budgetMin ? `${fmt(row.budgetMin)}만원` : "";
-  const max = row.budgetMax ? `${fmt(row.budgetMax)}만원` : "";
-  if (min && max) return `${min}~${max}`;
-  return min || max || row.budgetRaw || row.budgetBucket || "미기재";
+  return row.budgetMax ? `${fmt(row.budgetMax)}만원` : row.budgetBucket || "미기재";
 };
 const budgetRangeFromCondition = (value = "") => {
   const text = String(value).replaceAll(",", "").replace(/\s+/g, " ");
@@ -97,7 +93,7 @@ const budgetRangeFromCondition = (value = "") => {
   }
   if (!base) return null;
   const offsets = { 초반:[0,300], 초중반:[0,600], 중반:[400,600], 후반:[700,900] };
-  return { min:base + offsets[band][0] * scale, max:base + offsets[band][1] * scale, band };
+  return { max:base + offsets[band][1] * scale, band };
 };
 const includesAncillaryCost = (row) => (row.topics || []).includes("부대비용 포함");
 const topicsFromText = (conditionRaw = "", inquiryType = "", financeStatus = "") => {
@@ -132,7 +128,8 @@ function rowForSheet(row) {
     model1: models[0] || "",
     model2: models[1] || "",
     model3: models[2] || "",
-    budgetMin: row.budgetMin ?? "",
+    // 기존 구글시트 열 순서를 유지하되 최소 예산 값은 저장하지 않습니다.
+    budgetMin: "",
     budgetMax: row.budgetMax ?? "",
     purchaseTiming: row.purchaseTiming || "",
     financeStatus: row.financeStatus || "미확인",
@@ -155,7 +152,10 @@ async function loadData() {
     dataLoading = true;
     render();
     try {
-      leads = await sheetList(false);
+      leads = (await sheetList(false)).map(({ budgetMin, ...row }) => ({
+        ...row,
+        budgetMax: row.budgetMax || budgetMin || null,
+      }));
     } catch (error) {
       session = null;
       localStorage.removeItem(SESSION_KEY);
@@ -298,7 +298,7 @@ function renderOverview() {
   const recentTopModel = topEntries(recentByModel, 1)[0];
   const financeCount = leads.filter(r => r.financeStatus === "예").length;
   const financeRatio = leads.length ? financeCount / leads.length * 100 : 0;
-  const byBudget = count(leads.filter(r => r.budgetMin || r.budgetMax).map(budgetBand));
+  const byBudget = count(leads.filter(r => r.budgetMax).map(budgetBand));
   const budgetEntries = orderedBudgetEntries(byBudget);
   app.innerHTML = `
     <section class="kpis">
@@ -357,7 +357,6 @@ function renderAnalysis() {
         ${option("희망 차종", "model", leads.flatMap(r => r.models || []))}
         ${option("할부 여부", "financeStatus", leads.map(r => r.financeStatus || "미확인"))}
         ${option("방문 여부", "visitStatus", leads.map(r => r.visitStatus || "미확인"))}
-        <label>최소 예산(만원)<input name="budgetMin" type="number" min="0" step="100" value="${escapeHtml(analysisFilters.budgetMin || "")}" placeholder="예: 1000"></label>
         <label>최대 예산(만원)<input name="budgetMax" type="number" min="0" step="100" value="${escapeHtml(analysisFilters.budgetMax || "")}" placeholder="예: 3000"></label>
       </form>
     </section>
@@ -381,7 +380,7 @@ function analysisFilterSummary() {
   if (f.model) items.push(`희망 차종: ${f.model}`);
   if (f.financeStatus) items.push(`할부: ${f.financeStatus}`);
   if (f.visitStatus) items.push(`방문: ${f.visitStatus}`);
-  if (f.budgetMin || f.budgetMax) items.push(`예산: ${f.budgetMin || "0"} ~ ${f.budgetMax || "제한 없음"}만원`);
+  if (f.budgetMax) items.push(`최대 예산: ${f.budgetMax}만원`);
   return items.length ? items.join(" · ") : "전체 고객 데이터";
 }
 
@@ -463,7 +462,7 @@ function filteredAnalysisRows() {
   return leads.filter(r => {
     const searchable = [
       r.inquiryDate, r.phone, r.inquiryType, ...(r.models || []),
-      r.budgetMin, r.budgetMax, r.financeStatus, r.visitStatus,
+      r.budgetMax, r.financeStatus, r.visitStatus,
       r.conditionRaw,
     ].join(" ").toLowerCase();
     if (term && !searchable.includes(term)) return false;
@@ -473,8 +472,7 @@ function filteredAnalysisRows() {
     if (f.model && !(r.models || []).includes(f.model)) return false;
     if (f.financeStatus && (r.financeStatus || "미확인") !== f.financeStatus) return false;
     if (f.visitStatus && (r.visitStatus || "미확인") !== f.visitStatus) return false;
-    if (f.budgetMin && Number(r.budgetMax || r.budgetMin || 0) < Number(f.budgetMin)) return false;
-    if (f.budgetMax && Number(r.budgetMin || r.budgetMax || Infinity) > Number(f.budgetMax)) return false;
+    if (f.budgetMax && Number(r.budgetMax || Infinity) > Number(f.budgetMax)) return false;
     return true;
   });
 }
@@ -490,8 +488,8 @@ function renderAnalysisResults() {
   const byVisit = count(rows.map(r => r.visitStatus || "미확인"));
   const byWeekday = count(dated.map(r => weekdayLabels[parseDate(r.inquiryDate).getDay()]));
   const orderedWeekdays = weekdayLabels.slice(1).concat(weekdayLabels[0]).map(day => [day, byWeekday[day] || 0]);
-  const budgetRows = rows.filter(r => r.budgetMin || r.budgetMax);
-  const averageBudget = budgetRows.length ? Math.round(budgetRows.reduce((sum, r) => sum + Number(r.budgetMax || r.budgetMin || 0), 0) / budgetRows.length) : 0;
+  const budgetRows = rows.filter(r => r.budgetMax);
+  const averageBudget = budgetRows.length ? Math.round(budgetRows.reduce((sum, r) => sum + Number(r.budgetMax || 0), 0) / budgetRows.length) : 0;
   $("#analysisResults").innerHTML = `
     <section id="analysisReport" class="analysis-report">
       <header class="analysis-report-header">
@@ -642,7 +640,7 @@ function bars(entries) { const max = Math.max(...entries.map(([,v]) => v), 1); r
 function rankedCounts(entries) { return `<div class="ranked-counts">${entries.map(([k,v],i) => `<div><span><em>${i+1}</em>${escapeHtml(k)}</span><strong>${fmt(v)}<small>대</small></strong></div>`).join("") || `<p class="empty">표시할 차종 데이터가 없습니다.</p>`}</div>`; }
 function verticalBars(entries) { const max = Math.max(...entries.map(([,v]) => v), 1); return `<div class="vbars">${entries.map(([k,v]) => `<div><b>${v}</b><i style="height:${Math.max(v/max*100,3)}%"></i><span>${escapeHtml(String(k).slice(5).replace("-","/"))}</span></div>`).join("")}</div>`; }
 function donut(entries, chartRight=false) { const total = entries.reduce((s,[,v])=>s+v,0); let p=0; const colors=["#2f6fed","#16a085","#f59e0b","#8b5cf6","#ef5da8","#64748b","#0ea5e9","#f97316","#14b8a6","#eab308"]; const seg=entries.map(([,v],i)=>{const s=p; p+=total?v/total*100:0; return `${colors[i%colors.length]} ${s}% ${p}%`;}).join(","); const chart=`<div class="donut" style="background:conic-gradient(${seg || "#e2e8f0 0 100%"})"><div><strong>${fmt(total)}</strong><span>건</span></div></div>`; const legend=`<div class="legend">${entries.map(([k,v],i)=>`<span><i style="background:${colors[i%colors.length]}"></i>${escapeHtml(k)}<b>${fmt(v)}</b></span>`).join("")}</div>`; return `<div class="donut-wrap ${chartRight ? "chart-right" : ""}">${chartRight ? legend + chart : chart + legend}</div>`; }
-function budgetBand(row) { const value = Number(row.budgetMax || row.budgetMin || 0); if (!value) return "미입력"; if (value < 1000) return "1천만원 미만"; if (value < 2000) return "1천~2천만원"; if (value < 3000) return "2천~3천만원"; if (value < 4000) return "3천~4천만원"; if (value < 5000) return "4천~5천만원"; return "5천만원 이상"; }
+function budgetBand(row) { const value = Number(row.budgetMax || 0); if (!value) return "미입력"; if (value < 1000) return "1천만원 미만"; if (value < 2000) return "1천~2천만원"; if (value < 3000) return "2천~3천만원"; if (value < 4000) return "3천~4천만원"; if (value < 5000) return "4천~5천만원"; return "5천만원 이상"; }
 function orderedBudgetEntries(byBudget) {
   return ["1천만원 미만","1천~2천만원","2천~3천만원","3천~4천만원","4천~5천만원","5천만원 이상"]
     .map(label => [label, byBudget[label] || 0]);
@@ -817,10 +815,9 @@ function openLeadForm(initialPhone="", existing=null) {
       ${formField("희망 차종 2", modelControl("model2", models[1]||"", "복수 차종일 때 입력"))}
       ${formField("희망 차종 3", modelControl("model3", models[2]||"", "복수 차종일 때 입력"))}
       ${formField("구매 예정일", `<input name="purchaseTiming" value="${escapeHtml(r.purchaseTiming||"")}" placeholder="예: 즉시, 1개월 이내">`)}
-      ${formField("최소 예산(만원)", `<input name="budgetMin" inputmode="numeric" data-budget-input value="${formatThousands(r.budgetMin||"")}" placeholder="예: 1,000">`)}
       ${formField("최대 예산(만원)", `<input name="budgetMax" inputmode="numeric" data-budget-input value="${formatThousands(r.budgetMax||"")}" placeholder="예: 2,000">`)}
       <div class="checkbox-field"><span>예산 포함 범위</span><label class="inline-check"><input name="ancillaryIncluded" type="checkbox" ${includesAncillaryCost(r) ? "checked" : ""}> 부대비용 포함</label></div>
-      <p class="budget-hint">희망 조건에 ‘3000 초반’ 입력 시 최소 3,000만원·최대 3,300만원으로 자동 입력됩니다. 중반은 3,400~3,600만원, 후반은 3,700~3,900만원 기준입니다.</p>
+      <p class="budget-hint">희망 조건에 ‘3000 초반’ 입력 시 최대 예산 3,300만원으로 자동 입력됩니다. 중반은 3,600만원, 후반은 3,900만원 기준입니다.</p>
     </div></section>
     <section class="form-section"><h3>상담 진행 정보</h3><div class="form-grid">
       <div class="checkbox-field"><span>할부 여부</span><label class="inline-check status-check"><input name="financeStatus" type="checkbox" ${r.financeStatus==="예" ? "checked" : ""}> 할부 문의 있음</label></div>
@@ -855,7 +852,6 @@ function openLeadForm(initialPhone="", existing=null) {
     setControlValue("inquiryType",latest.inquiryType||"구매");
     [0,1,2].forEach(index=>setControlValue(`model${index+1}`,(latest.models||[])[index]||""));
     setControlValue("purchaseTiming",latest.purchaseTiming);
-    setControlValue("budgetMin",formatThousands(latest.budgetMin||""));
     setControlValue("budgetMax",formatThousands(latest.budgetMax||""));
     setControlValue("conditionRaw",latest.conditionRaw);
     dlg.querySelector('[name="ancillaryIncluded"]').checked=includesAncillaryCost(latest);
@@ -866,7 +862,6 @@ function openLeadForm(initialPhone="", existing=null) {
     const latest=customer?.inquiries?.[0];
     if (!latest) return;
     [0,1,2].forEach(index=>setControlValue(`model${index+1}`,(latest.models||[])[index]||""));
-    setControlValue("budgetMin",formatThousands(latest.budgetMin||""));
     setControlValue("budgetMax",formatThousands(latest.budgetMax||""));
     dlg.querySelector('[name="ancillaryIncluded"]').checked=includesAncillaryCost(latest);
   };
@@ -915,7 +910,6 @@ function openLeadForm(initialPhone="", existing=null) {
   conditionInput.addEventListener("input", () => {
     const inferred=budgetRangeFromCondition(conditionInput.value);
     if (inferred) {
-      dlg.querySelector('[name="budgetMin"]').value=formatThousands(inferred.min);
       dlg.querySelector('[name="budgetMax"]').value=formatThousands(inferred.max);
     }
     if (conditionInput.value.includes("할부")) dlg.querySelector('[name="financeStatus"]').checked=true;
@@ -931,21 +925,15 @@ function openLeadForm(initialPhone="", existing=null) {
     if (!validPhone(phone)) { alert("연락처를 010-0000-0000 형식으로 입력해 주세요."); return; }
     const conditionRaw=String(f.get("conditionRaw")||"").trim();
     const inferredBudget=budgetRangeFromCondition(conditionRaw);
-    let budgetMin=inferredBudget?.min || parseFormattedNumber(f.get("budgetMin"));
-    let budgetMax=inferredBudget?.max || parseFormattedNumber(f.get("budgetMax"));
-    if (!inferredBudget && budgetMin && budgetMax && budgetMin === budgetMax) {
-      budgetMax=budgetMin;
-      budgetMin=null;
-    }
-    if (budgetMin && budgetMax && budgetMin > budgetMax) { alert("최소 예산은 최대 예산보다 클 수 없습니다."); return; }
+    const budgetMax=inferredBudget?.max || parseFormattedNumber(f.get("budgetMax"));
     const inquiryType=String(f.get("inquiryType")||"구매").trim();
     const financeStatus=conditionRaw.includes("할부") || f.get("financeStatus")==="on" ? "예" : "아니오";
     const visitStatus=conditionRaw.includes("방문") || f.get("visitStatus")==="on" ? "예" : "아니오";
     const ancillaryIncluded=f.get("ancillaryIncluded")==="on";
     const topics=uniq([...(r.topics||[]).filter(t=>t && t!=="부대비용 포함"),...topicsFromText(conditionRaw,inquiryType,financeStatus),...(ancillaryIncluded?["부대비용 포함"]:[])]);
-    const row={...r,id:r.id||`local-${Date.now()}`,source:"manual",inquiryDate:f.get("inquiryDate"),phone,inquiryChannel:r.inquiryChannel||"",inquiryType,models:[f.get("model1"),f.get("model2"),f.get("model3")].map(s=>String(s||"").trim()).filter(Boolean),budgetMin,budgetMax,budgetRaw:[budgetMin,budgetMax].filter(Boolean).join("~"),budgetBucket:"표현형",purchaseTiming:String(f.get("purchaseTiming")||"").trim(),financeStatus,visitStatus,staffName:r.staffName||"",leadSource:r.leadSource||"",callOutcome:r.callOutcome||"",followUpDate:r.followUpDate||"",conditionRaw,topics};
+    const row={...r,id:r.id||`local-${Date.now()}`,source:"manual",inquiryDate:f.get("inquiryDate"),phone,inquiryChannel:r.inquiryChannel||"",inquiryType,models:[f.get("model1"),f.get("model2"),f.get("model3")].map(s=>String(s||"").trim()).filter(Boolean),budgetMax,budgetRaw:budgetMax?String(budgetMax):"",budgetBucket:"표현형",purchaseTiming:String(f.get("purchaseTiming")||"").trim(),financeStatus,visitStatus,staffName:r.staffName||"",leadSource:r.leadSource||"",callOutcome:r.callOutcome||"",followUpDate:r.followUpDate||"",conditionRaw,topics};
     if (!existing) {
-      const signature=value=>JSON.stringify([phoneKey(value.phone),value.inquiryDate||"",value.inquiryType||"",value.models||[],Number(value.budgetMin||0),Number(value.budgetMax||0),value.financeStatus||"",value.visitStatus||"",String(value.conditionRaw||"").trim()]);
+      const signature=value=>JSON.stringify([phoneKey(value.phone),value.inquiryDate||"",value.inquiryType||"",value.models||[],Number(value.budgetMax||0),value.financeStatus||"",value.visitStatus||"",String(value.conditionRaw||"").trim()]);
       const duplicate=leads.find(item=>signature(item)===signature(row));
       if (duplicate) {
         alert("같은 날짜에 동일한 상담 내용이 이미 저장되어 있습니다. 중복 기록은 추가하지 않았습니다.");
@@ -975,7 +963,7 @@ function openLeadForm(initialPhone="", existing=null) {
     dlg.remove();
   }, { once:true });
 }
-function exportCsv() { const csv=["문의 날짜,연락처,문의 종류,희망 차량 1,희망 차량 2,희망 차량 3,최소 예산,최대 예산,부대비용 포함,구매 예정일,할부 여부,방문 여부,희망 조건",...leads.map(r=>[r.inquiryDate,r.phone,r.inquiryType,...[0,1,2].map(i=>(r.models||[])[i]||""),r.budgetMin,r.budgetMax,includesAncillaryCost(r)?"예":"아니오",r.purchaseTiming,r.financeStatus,r.visitStatus,r.conditionRaw].map(v=>`"${String(v||"").replaceAll('"','""')}"`).join(","))].join("\n"); const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob(["\ufeff",csv],{type:"text/csv;charset=utf-8"})); a.download=`jungcar-db-${today()}.csv`; a.click(); URL.revokeObjectURL(a.href); }
+function exportCsv() { const csv=["문의 날짜,연락처,문의 종류,희망 차량 1,희망 차량 2,희망 차량 3,최대 예산,부대비용 포함,구매 예정일,할부 여부,방문 여부,희망 조건",...leads.map(r=>[r.inquiryDate,r.phone,r.inquiryType,...[0,1,2].map(i=>(r.models||[])[i]||""),r.budgetMax||"",includesAncillaryCost(r)?"예":"아니오",r.purchaseTiming,r.financeStatus,r.visitStatus,r.conditionRaw].map(v=>`"${String(v||"").replaceAll('"','""')}"`).join(","))].join("\n"); const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob(["\ufeff",csv],{type:"text/csv;charset=utf-8"})); a.download=`jungcar-db-${today()}.csv`; a.click(); URL.revokeObjectURL(a.href); }
 function escapeHtml(v) { return String(v ?? "").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c])); }
 const isTextEntryTarget = target => target instanceof HTMLElement && (target.matches("input, textarea, select") || target.isContentEditable);
 document.addEventListener("keydown", event => {
