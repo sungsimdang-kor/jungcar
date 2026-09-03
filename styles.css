@@ -21,6 +21,24 @@ body {
   text-rendering:optimizeLegibility;
 }
 body.modal-open { overflow:hidden; }
+.sync-notice {
+  background:#eff6ff;
+  border:1px solid #bfdbfe;
+  border-radius:12px;
+  box-shadow:0 14px 34px rgba(15,23,42,.2);
+  color:#1e3a8a;
+  font-size:13px;
+  font-weight:800;
+  line-height:1.5;
+  max-width:min(460px,calc(100vw - 32px));
+  padding:13px 16px;
+  position:fixed;
+  right:20px;
+  top:20px;
+  z-index:10000;
+}
+.sync-notice.success { background:#ecfdf5;border-color:#a7f3d0;color:#065f46; }
+.sync-notice.error { background:#fff1f2;border-color:#fecdd3;color:#9f1239; }
 button,input,select,textarea { font-family:inherit; }
 button { cursor:pointer; }
 .layout { display:grid;grid-template-columns:230px 1fr;min-height:100vh; }

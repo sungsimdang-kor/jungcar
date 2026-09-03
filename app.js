@@ -1,9 +1,11 @@
 
 const FIXED_APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwzmFAtSNUX9CB7BKELlcM95M76CuojmA8szFAlf9umhv1POGW1VC4QcA6ztltByEBy/exec";
 const LOGIN_USERNAME = "배찬오";
-const SETTINGS_KEY = "jungcar-sheet-sync";
 const SESSION_KEY = "jungcar-session";
 const LAST_INQUIRY_DATE_KEY = "jungcar-last-inquiry-date";
+const PENDING_DB_NAME = "jungcar-crm-safety";
+const PENDING_DB_VERSION = 1;
+const PENDING_STORE_NAME = "pending-sheet-saves";
 let leads = [];
 let activeTab = "overview";
 let selectedCustomer = null;
@@ -12,6 +14,9 @@ let analysisFilters = {};
 let loginInProgress = false;
 let dataLoading = false;
 let htmlToImagePromise = null;
+let pendingDbPromise = null;
+let pendingFlushPromise = null;
+let pendingRetryTimer = null;
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
@@ -47,6 +52,7 @@ const addDays = (date, days) => { const next = new Date(date); next.setDate(next
 const addMonths = (date, months) => { const next = new Date(date); next.setMonth(next.getMonth() + months); return next; };
 const weekdayLabels = ["일요일","월요일","화요일","수요일","목요일","금요일","토요일"];
 const selected = (value, expected) => value === expected ? "selected" : "";
+const createSiteId = () => `site-${globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
 // 중카TV 국산차·수입차 검색의 제조사별 '모델' 단계 기준. 세부모델·등급은 제외합니다.
 const MODEL_CATALOG = {
   "현대":["그랜저","쏘나타","아반떼","스타렉스","싼타페","투싼","팰리세이드","스타리아","코나","제네시스","i30","i40","넥쏘","맥스크루즈","베뉴","베라쿠르즈","벨로스터","솔라티","아슬란","아이오닉 5","아이오닉 6","아이오닉 9","아이오닉","에쿠스","엑센트","캐스퍼","갤로퍼","그레이스","다이너스티","라비타","마르샤","베르나","아토스","엘란트라","싼타모","스텔라","스쿠프","엑셀","클릭","테라칸","투스카니","트라제XG","티뷰론","포니","리베로","프레스토","블루온"],
@@ -109,9 +115,74 @@ const topicsFromText = (conditionRaw = "", inquiryType = "", financeStatus = "")
   ];
   return rules.filter(([, words]) => words.some(word => raw.includes(word.toLowerCase()))).map(([label]) => label);
 };
-const getSettings = () => ({ autoPush: true, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}"), endpoint: FIXED_APPS_SCRIPT_URL });
-const saveSettings = (settings) => localStorage.setItem(SETTINGS_KEY, JSON.stringify({ endpoint: FIXED_APPS_SCRIPT_URL, autoPush: settings.autoPush !== false }));
+const getSettings = () => ({ endpoint: FIXED_APPS_SCRIPT_URL });
 const isLoggedIn = () => Boolean(session?.sessionToken && getSettings().endpoint);
+
+function openPendingDb() {
+  if (!("indexedDB" in window)) return Promise.reject(new Error("안전 저장소를 사용할 수 없습니다. Chrome 브라우저 설정을 확인해 주세요."));
+  if (pendingDbPromise) return pendingDbPromise;
+  pendingDbPromise = new Promise((resolve, reject) => {
+    const request = indexedDB.open(PENDING_DB_NAME, PENDING_DB_VERSION);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(PENDING_STORE_NAME)) db.createObjectStore(PENDING_STORE_NAME, { keyPath: "id" });
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(new Error("미확인 저장 내역을 보관하지 못했습니다."));
+    request.onblocked = () => reject(new Error("안전 저장소 연결이 차단되었습니다. 다른 중카TV 탭을 닫고 다시 시도해 주세요."));
+  }).catch(error => {
+    pendingDbPromise = null;
+    throw error;
+  });
+  return pendingDbPromise;
+}
+
+async function putPendingSave(row) {
+  const db = await openPendingDb();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(PENDING_STORE_NAME, "readwrite");
+    transaction.objectStore(PENDING_STORE_NAME).put({ id: String(row.id), row, queuedAt: Date.now() });
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(new Error("미확인 저장 내역을 보관하지 못했습니다."));
+    transaction.onabort = () => reject(new Error("미확인 저장 내역을 보관하지 못했습니다."));
+  });
+}
+
+async function deletePendingSave(siteId) {
+  const db = await openPendingDb();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(PENDING_STORE_NAME, "readwrite");
+    transaction.objectStore(PENDING_STORE_NAME).delete(String(siteId));
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(new Error("완료된 임시 저장 내역을 정리하지 못했습니다."));
+    transaction.onabort = () => reject(new Error("완료된 임시 저장 내역을 정리하지 못했습니다."));
+  });
+}
+
+async function listPendingSaves() {
+  const db = await openPendingDb();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(PENDING_STORE_NAME, "readonly");
+    const request = transaction.objectStore(PENDING_STORE_NAME).getAll();
+    request.onsuccess = () => resolve((request.result || []).sort((a,b) => a.queuedAt - b.queuedAt));
+    request.onerror = () => reject(new Error("미확인 저장 내역을 확인하지 못했습니다."));
+  });
+}
+
+function mergeLead(row) {
+  const exists = leads.some(item => String(item.id) === String(row.id));
+  leads = exists ? leads.map(item => String(item.id) === String(row.id) ? row : item) : [row, ...leads];
+}
+
+function showSyncNotice(message, type="info", persistent=false) {
+  document.querySelector(".sync-notice")?.remove();
+  const notice = document.createElement("div");
+  notice.className = `sync-notice ${type}`;
+  notice.setAttribute("role", type === "error" ? "alert" : "status");
+  notice.textContent = message;
+  document.body.appendChild(notice);
+  if (!persistent) setTimeout(() => notice.remove(), 3500);
+}
 
 function duplicateKey(row) {
   return [row.inquiryDate || "", normalizePhone(row.phone || ""), (row.models || []).slice().sort().join(","), (row.conditionRaw || "").slice(0, 80)].join("|").toLowerCase();
@@ -167,6 +238,7 @@ async function loadData() {
     dataLoading = false;
   }
   render();
+  resumePendingSaves();
 }
 
 function buildCustomers(rows = leads) {
@@ -258,6 +330,7 @@ async function login(event) {
     activeTab = "overview";
     loginInProgress = false;
     render();
+    resumePendingSaves();
   } catch (err) {
     loginInProgress = false;
     session = null;
@@ -515,33 +588,26 @@ function renderAnalysisResults() {
 }
 
 function renderSettings() {
-  const settings = getSettings();
   app.innerHTML = `
     <section class="sync-hero">
       <div><span>JUNGCAR CRM SETTINGS</span><h2>설정 및 백업</h2><p>데이터 동기화, 연결 확인, 백업과 로그아웃을 한곳에서 관리합니다.</p></div>
-      <div class="settings-summary"><b>Google Sheets</b><span>저장 시 자동 반영 ${settings.autoPush ? "사용 중" : "사용 안 함"}</span></div>
+      <div class="settings-summary"><b>Google Sheets</b><span>저장 확인 필수 사용 중</span></div>
     </section>
     <section class="panel sync-panel">
       <h3>구글시트 연동</h3>
-      <label class="check"><input id="syncAuto" type="checkbox" ${settings.autoPush ? "checked" : ""}> 고객 저장 시 구글시트 자동 반영</label>
-      <div class="sync-buttons"><button id="saveSync">설정 저장</button><button id="testSync">연결 테스트</button><button id="pullSheet">시트 → 사이트 새로고침</button><button id="pushSheet">현재 사이트 → 시트 반영</button><button id="logout">로그아웃</button></div>
+      <p class="status">고객 저장은 구글시트에 기록된 값을 다시 확인한 후에만 완료됩니다.</p>
+      <div class="sync-buttons"><button id="testSync">연결 테스트</button><button id="pullSheet">시트 → 사이트 새로고침</button><button id="pushSheet">현재 사이트 → 시트 반영</button><button id="logout">로그아웃</button></div>
       <p id="syncStatus" class="status"></p>
       <hr>
       <h3>데이터 백업</h3>
       <p class="status">현재 구글시트에서 불러온 모든 상담 데이터를 CSV 파일로 저장합니다.</p>
       <div class="sync-buttons"><button id="settingsExportCsv">CSV 백업 다운로드</button></div>
     </section>`;
-  $("#saveSync").onclick = saveSyncForm;
-  $("#testSync").onclick = async () => { saveSyncForm(); await sheetList(true); };
-  $("#pullSheet").onclick = async () => { saveSyncForm(); await pullFromSheet(); };
-  $("#pushSheet").onclick = async () => { saveSyncForm(); await pushAllToSheet(); };
+  $("#testSync").onclick = async () => { await sheetList(true); };
+  $("#pullSheet").onclick = async () => { await pullFromSheet(); };
+  $("#pushSheet").onclick = async () => { await pushAllToSheet(); };
   $("#logout").onclick = logout;
   $("#settingsExportCsv").onclick = exportCsv;
-}
-
-function saveSyncForm() {
-  saveSettings({ autoPush: $("#syncAuto").checked });
-  $("#syncStatus").textContent = "연동 설정을 저장했습니다.";
 }
 
 function sheetJsonp(action, payload = {}) {
@@ -563,7 +629,7 @@ function sheetJsonp(action, payload = {}) {
     if (payload.row) url.searchParams.set("row", JSON.stringify(payload.row));
     if (payload.siteId) url.searchParams.set("siteId", payload.siteId);
     const script = document.createElement("script");
-    const timeoutMs = action === "list" ? 90000 : 60000;
+    const timeoutMs = action === "list" ? 90000 : 25000;
     const timeout = setTimeout(() => { cleanup(); reject(new Error("구글시트 응답 시간이 초과되었습니다.")); }, timeoutMs);
     function cleanup() { clearTimeout(timeout); delete window[callback]; script.remove(); }
     window[callback] = (data) => { cleanup(); data?.ok === false ? reject(new Error(data.error || "구글시트 요청 실패")) : resolve(data); };
@@ -573,13 +639,23 @@ function sheetJsonp(action, payload = {}) {
   });
 }
 
-async function sheetPost(action, payload = {}) {
+async function sheetPost(action, payload = {}, timeoutMs=12000) {
   const settings = getSettings();
+  if (!settings.endpoint) throw new Error("Apps Script URL이 설정되지 않았습니다.");
   if (!session?.sessionToken) throw new Error("로그인 후 이용하세요.");
-  const res = await fetch(settings.endpoint, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ sessionToken: session.sessionToken, action, ...payload }) });
-  const data = await res.json();
-  if (!res.ok || data.ok === false) throw new Error(data.error || "구글시트 POST 요청 실패");
-  return data;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(settings.endpoint, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ sessionToken: session.sessionToken, action, ...payload }), signal: controller.signal });
+    const data = await res.json();
+    if (!res.ok || data.ok === false) throw new Error(data.error || "구글시트 POST 요청 실패");
+    return data;
+  } catch (error) {
+    if (error?.name === "AbortError") throw new Error("구글시트 저장 응답이 지연되어 안전 재시도를 시작합니다.");
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function sheetList(showStatus=false) {
@@ -624,14 +700,81 @@ async function pushAllToSheet() {
 
 async function syncUpsert(row) {
   const settings = getSettings();
-  if (!settings.autoPush || !settings.endpoint || !session?.sessionToken) return;
-  try { await sheetJsonp("upsert", { row: rowForSheet(row) }); } catch (err) { console.warn(err); }
+  if (!settings.endpoint || !session?.sessionToken) throw new Error("로그인 세션을 확인할 수 없습니다.");
+  const sheetRow = rowForSheet(row);
+  let firstError;
+  for (const request of [
+    () => sheetPost("upsert", { row: sheetRow }),
+    () => sheetJsonp("upsert", { row: sheetRow }),
+  ]) {
+    try {
+      const result = await request();
+      const confirmed = result?.saved?.some(saved => String(saved.siteId) === String(sheetRow.siteId));
+      if (!result?.ok || !confirmed) throw new Error("구글시트에 기록된 값을 확인하지 못했습니다.");
+      return result;
+    } catch (error) {
+      firstError ||= error;
+    }
+  }
+  throw new Error(`저장을 확인하지 못했습니다. 입력 내용은 안전하게 보관되었으며 자동으로 다시 시도합니다. (${firstError?.message || "네트워크 오류"})`);
+}
+
+async function flushPendingSaves({ announce=false }={}) {
+  if (!isLoggedIn()) return { saved:0, pending:0 };
+  if (pendingFlushPromise) return pendingFlushPromise;
+  pendingFlushPromise = (async () => {
+    const pending = await listPendingSaves();
+    if (!pending.length) return { saved:0, pending:0 };
+    if (announce) showSyncNotice(`미확인 저장 ${fmt(pending.length)}건을 다시 확인하는 중입니다.`, "info", true);
+    let saved = 0;
+    for (const item of pending) {
+      try {
+        await syncUpsert(item.row);
+        await deletePendingSave(item.id);
+        mergeLead(item.row);
+        saved += 1;
+      } catch (error) {
+        showSyncNotice(error.message, "error", true);
+        return { saved, pending:pending.length - saved, error };
+      }
+    }
+    if (announce) showSyncNotice(`미확인 저장 ${fmt(saved)}건을 구글시트에 확인했습니다.`, "success");
+    return { saved, pending:0 };
+  })().finally(() => { pendingFlushPromise = null; });
+  return pendingFlushPromise;
+}
+
+function resumePendingSaves() {
+  flushPendingSaves({ announce:true })
+    .then(result => { if (result.saved) render(); })
+    .catch(error => showSyncNotice(error.message, "error", true));
+}
+
+function schedulePendingRetry() {
+  if (pendingRetryTimer) return;
+  pendingRetryTimer = setTimeout(() => {
+    pendingRetryTimer = null;
+    if (isLoggedIn()) resumePendingSaves();
+  }, 15000);
 }
 
 async function syncDelete(siteId) {
   const settings = getSettings();
-  if (!settings.autoPush || !settings.endpoint || !session?.sessionToken) return;
-  try { await sheetJsonp("delete", { siteId }); } catch (err) { console.warn(err); }
+  if (!settings.endpoint || !session?.sessionToken) throw new Error("로그인 세션을 확인할 수 없습니다.");
+  let firstError;
+  for (const request of [
+    () => sheetPost("delete", { siteId }),
+    () => sheetJsonp("delete", { siteId }),
+  ]) {
+    try {
+      const result = await request();
+      if (!result?.ok || String(result.siteId) !== String(siteId)) throw new Error("구글시트 삭제 여부를 확인하지 못했습니다.");
+      return result;
+    } catch (error) {
+      firstError ||= error;
+    }
+  }
+  throw new Error(`삭제를 확인하지 못했습니다. 시트에서 확인되기 전까지 화면의 데이터는 유지됩니다. (${firstError?.message || "네트워크 오류"})`);
 }
 
 function kpi(label, value, detail) { return `<article class="kpi"><span>${label}</span><strong>${value}</strong><small>${detail}</small></article>`; }
@@ -725,10 +868,19 @@ function bindDetail() {
   $$("[data-del]").forEach(b=>b.onclick=async()=>{
     const row = leads.find(r => r.id === b.dataset.del);
     if (!row || !confirm(`${row.inquiryDate || "날짜 없음"} 상담 내역을 삭제하시겠습니까?`)) return;
-    leads=leads.filter(r=>r.id!==row.id);
-    await syncDelete(row.id);
-    selectedCustomer=buildCustomers().find(c=>c.id===selectedCustomer?.id)||null;
-    renderCustomers();
+    b.disabled=true;
+    const originalLabel=b.textContent;
+    b.textContent="삭제 확인 중...";
+    try {
+      await syncDelete(row.id);
+      leads=leads.filter(r=>r.id!==row.id);
+      selectedCustomer=buildCustomers().find(c=>c.id===selectedCustomer?.id)||null;
+      renderCustomers();
+    } catch (error) {
+      b.disabled=false;
+      b.textContent=originalLabel;
+      alert(error?.message || "삭제를 확인하지 못했습니다.");
+    }
   });
 }
 function formField(label, control, cls="") { return `<label class="${cls}"><span>${label}</span>${control}</label>`; }
@@ -799,6 +951,7 @@ function bindModelAutocomplete(root) {
 }
 function openLeadForm(initialPhone="", existing=null) {
   const r=existing||{};
+  const draftId=String(r.id||createSiteId());
   const models=(r.models||[]);
   const defaultInquiryDate=existing ? r.inquiryDate : initialPhone ? today() : lastRecordedInquiryDate();
   const inquiryTypeChoices=uniq([r.inquiryType,"구매","판매","판매 후 구매","할부/한도","방문 일정","수리/보증","기타/문의"]);
@@ -931,7 +1084,7 @@ function openLeadForm(initialPhone="", existing=null) {
     const visitStatus=conditionRaw.includes("방문") || f.get("visitStatus")==="on" ? "예" : "아니오";
     const ancillaryIncluded=f.get("ancillaryIncluded")==="on";
     const topics=uniq([...(r.topics||[]).filter(t=>t && t!=="부대비용 포함"),...topicsFromText(conditionRaw,inquiryType,financeStatus),...(ancillaryIncluded?["부대비용 포함"]:[])]);
-    const row={...r,id:r.id||`local-${Date.now()}`,source:"manual",inquiryDate:f.get("inquiryDate"),phone,inquiryChannel:r.inquiryChannel||"",inquiryType,models:[f.get("model1"),f.get("model2"),f.get("model3")].map(s=>String(s||"").trim()).filter(Boolean),budgetMax,budgetRaw:budgetMax?String(budgetMax):"",budgetBucket:"표현형",purchaseTiming:String(f.get("purchaseTiming")||"").trim(),financeStatus,visitStatus,staffName:r.staffName||"",leadSource:r.leadSource||"",callOutcome:r.callOutcome||"",followUpDate:r.followUpDate||"",conditionRaw,topics};
+    const row={...r,id:draftId,source:"manual",inquiryDate:f.get("inquiryDate"),phone,inquiryChannel:r.inquiryChannel||"",inquiryType,models:[f.get("model1"),f.get("model2"),f.get("model3")].map(s=>String(s||"").trim()).filter(Boolean),budgetMax,budgetRaw:budgetMax?String(budgetMax):"",budgetBucket:"표현형",purchaseTiming:String(f.get("purchaseTiming")||"").trim(),financeStatus,visitStatus,staffName:r.staffName||"",leadSource:r.leadSource||"",callOutcome:r.callOutcome||"",followUpDate:r.followUpDate||"",conditionRaw,topics};
     if (!existing) {
       const signature=value=>JSON.stringify([phoneKey(value.phone),value.inquiryDate||"",value.inquiryType||"",value.models||[],Number(value.budgetMax||0),value.financeStatus||"",value.visitStatus||"",String(value.conditionRaw||"").trim()]);
       const duplicate=leads.find(item=>signature(item)===signature(row));
@@ -944,8 +1097,10 @@ function openLeadForm(initialPhone="", existing=null) {
     saveButton.disabled=true;
     saveButton.textContent="저장 중...";
     try {
-      if(existing) leads=leads.map(x=>x.id===row.id?row:x); else leads=[row,...leads];
+      await putPendingSave(row);
       await syncUpsert(row);
+      try { await deletePendingSave(row.id); } catch (cleanupError) { console.warn(cleanupError); }
+      mergeLead(row);
       localStorage.setItem(LAST_INQUIRY_DATE_KEY,row.inquiryDate);
       dlg.close();
       selectedCustomer=buildCustomers().find(c=>c.id===phoneKey(row.phone))||null;
@@ -955,7 +1110,8 @@ function openLeadForm(initialPhone="", existing=null) {
       saveInProgress=false;
       saveButton.disabled=false;
       saveButton.textContent=detectedCustomer ? "추가 상담 기록 저장" : "저장";
-      alert("저장 중 문제가 발생했습니다. 잠시 후 다시 시도해 주세요.");
+      schedulePendingRetry();
+      alert(error?.message || "저장을 확인하지 못했습니다. 입력 내용은 현재 창에 그대로 남아 있습니다.");
     }
   };
   dlg.addEventListener("close",()=>{
@@ -992,3 +1148,6 @@ $$("[data-tab]").forEach(btn => btn.onclick = () => {
   render();
 });
 loadData();
+window.addEventListener("online", () => {
+  if (isLoggedIn()) resumePendingSaves();
+});

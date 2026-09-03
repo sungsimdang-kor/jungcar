@@ -30,15 +30,20 @@ function doPost(e) {
 }
 
 function handle(body) {
-  if (body.action === "login") return login(body.username, body.password);
-  if (!validateSession(body.sessionToken)) return { ok: false, error: "로그인이 필요합니다." };
+  try {
+    if (body.action === "login") return login(body.username, body.password);
+    if (!validateSession(body.sessionToken)) return { ok: false, error: "로그인이 필요합니다." };
 
-  const sheet = getSheet();
-  if (body.action === "list") return readRows(sheet);
-  if (body.action === "upsert") return upsertRows(sheet, [body.row]);
-  if (body.action === "replaceAll") return replaceAll(sheet, body.rows || []);
-  if (body.action === "delete") return deleteBySiteId(sheet, body.siteId);
-  return { ok: false, error: "지원하지 않는 요청입니다." };
+    const sheet = getSheet();
+    if (body.action === "list") return readRows(sheet);
+    if (body.action === "upsert") return upsertRows(sheet, [body.row]);
+    if (body.action === "replaceAll") return replaceAll(sheet, body.rows || []);
+    if (body.action === "delete") return deleteBySiteId(sheet, body.siteId);
+    return { ok: false, error: "지원하지 않는 요청입니다." };
+  } catch (error) {
+    console.error(error);
+    return { ok: false, error: error && error.message ? error.message : "구글시트 처리 중 문제가 발생했습니다." };
+  }
 }
 
 function login(username, password) {
@@ -78,8 +83,7 @@ function sha256(value) {
 function getSheet() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(SHEET_NAME) || ss.insertSheet(SHEET_NAME);
-  const first = sheet.getRange(1, 1, 1, HEADERS.length).getValues()[0];
-  if (first.join("") === "") sheet.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS]);
+  if (sheet.getLastRow() === 0) sheet.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS]);
   return sheet;
 }
 
@@ -91,13 +95,52 @@ function readRows(sheet) {
 }
 
 function upsertRows(sheet, rows) {
-  const idMap = siteIdMap(sheet);
-  rows.filter(Boolean).forEach(row => {
-    const values = toValues(row);
-    const target = row.siteId && idMap[row.siteId] ? idMap[row.siteId] : sheet.getLastRow() + 1;
-    sheet.getRange(target, 1, 1, HEADERS.length).setValues([values]);
-  });
-  return { ok: true, updated: rows.length };
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) {
+    return { ok: false, error: "다른 상담을 저장하고 있습니다. 잠시 후 자동으로 다시 시도해 주세요." };
+  }
+  try {
+    const saved = rows.filter(Boolean).map(row => {
+      if (!row.siteId) throw new Error("상담 저장번호가 없습니다.");
+      const values = toValues(row);
+      const existingRow = findSiteIdRow(sheet, row.siteId);
+      const targetRow = existingRow || sheet.getLastRow() + 1;
+      sheet.getRange(targetRow, 1, 1, HEADERS.length).setValues([values]);
+      SpreadsheetApp.flush();
+      verifySavedRow(sheet, targetRow, values);
+      return { siteId: String(row.siteId), row: targetRow, created: !existingRow };
+    });
+    return { ok: true, updated: saved.length, saved };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function findSiteIdRow(sheet, siteId) {
+  const lastRow = sheet.getLastRow();
+  if (!siteId || lastRow < 2) return 0;
+  const found = sheet
+    .getRange(2, 1, lastRow - 1, 1)
+    .createTextFinder(String(siteId))
+    .matchEntireCell(true)
+    .findNext();
+  return found ? found.getRow() : 0;
+}
+
+function verifySavedRow(sheet, rowNumber, expectedValues) {
+  const storedValues = sheet.getRange(rowNumber, 1, 1, HEADERS.length).getValues()[0];
+  for (let column = 0; column < HEADERS.length - 1; column += 1) {
+    if (normalizedCellValue(storedValues[column]) !== normalizedCellValue(expectedValues[column])) {
+      throw new Error("구글시트 기록 확인에 실패했습니다.");
+    }
+  }
+}
+
+function normalizedCellValue(value) {
+  if (Object.prototype.toString.call(value) === "[object Date]" && !isNaN(value)) {
+    return Utilities.formatDate(value, Session.getScriptTimeZone(), "yyyy-MM-dd");
+  }
+  return String(value == null ? "" : value).trim();
 }
 
 function replaceAll(sheet, rows) {
@@ -108,19 +151,20 @@ function replaceAll(sheet, rows) {
 }
 
 function deleteBySiteId(sheet, siteId) {
-  const idMap = siteIdMap(sheet);
-  if (siteId && idMap[siteId]) sheet.deleteRow(idMap[siteId]);
-  return { ok: true, deleted: Boolean(siteId && idMap[siteId]) };
-}
-
-function siteIdMap(sheet) {
-  const values = sheet.getDataRange().getValues();
-  const map = {};
-  for (let row = 2; row <= values.length; row++) {
-    const id = values[row - 1][0];
-    if (id) map[String(id)] = row;
+  if (!siteId) return { ok: false, error: "삭제할 상담 저장번호가 없습니다." };
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) {
+    return { ok: false, error: "다른 상담을 저장하고 있습니다. 잠시 후 다시 시도해 주세요." };
   }
-  return map;
+  try {
+    const targetRow = findSiteIdRow(sheet, siteId);
+    if (targetRow) sheet.deleteRow(targetRow);
+    SpreadsheetApp.flush();
+    if (findSiteIdRow(sheet, siteId)) throw new Error("구글시트 삭제 확인에 실패했습니다.");
+    return { ok: true, deleted: Boolean(targetRow), siteId: String(siteId) };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function toValues(row) {
