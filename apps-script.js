@@ -37,12 +37,13 @@ function handle(body) {
     const sheet = getSheet();
     if (body.action === "list") return readRows(sheet);
     if (body.action === "upsert") return upsertRows(sheet, [body.row]);
+    if (body.action === "verify") return verifyRowRequest(sheet, body.row);
     if (body.action === "replaceAll") return replaceAll(sheet, body.rows || []);
     if (body.action === "delete") return deleteBySiteId(sheet, body.siteId);
     return { ok: false, error: "지원하지 않는 요청입니다." };
   } catch (error) {
     console.error(error);
-    return { ok: false, error: error && error.message ? error.message : "구글시트 처리 중 문제가 발생했습니다." };
+    return { ok: false, code: error.code || "SHEET_ERROR", error: error && error.message ? error.message : "구글시트 처리 중 문제가 발생했습니다." };
   }
 }
 
@@ -129,18 +130,30 @@ function findSiteIdRow(sheet, siteId) {
 
 function verifySavedRow(sheet, rowNumber, expectedValues) {
   const storedValues = sheet.getRange(rowNumber, 1, 1, HEADERS.length).getValues()[0];
+  const timezone = sheet.getParent().getSpreadsheetTimeZone();
   for (let column = 0; column < HEADERS.length - 1; column += 1) {
-    if (normalizedCellValue(storedValues[column]) !== normalizedCellValue(expectedValues[column])) {
-      throw new Error("구글시트 기록 확인에 실패했습니다.");
+    if (normalizedCellValue(storedValues[column], timezone) !== normalizedCellValue(expectedValues[column], timezone)) {
+      const error = new Error("구글시트 기록 확인 불일치: " + HEADERS[column] + ". 입력 내용은 임시 보관됩니다.");
+      error.code = "VERIFY_MISMATCH";
+      throw error;
     }
   }
 }
 
-function normalizedCellValue(value) {
+function normalizedCellValue(value, timezone) {
   if (Object.prototype.toString.call(value) === "[object Date]" && !isNaN(value)) {
-    return Utilities.formatDate(value, Session.getScriptTimeZone(), "yyyy-MM-dd");
+    return Utilities.formatDate(value, timezone || Session.getScriptTimeZone(), "yyyy-MM-dd");
   }
   return String(value == null ? "" : value).trim();
+}
+
+// 응답 유실 후에는 같은 데이터를 다시 쓰지 않고 저장된 행만 확인합니다.
+function verifyRowRequest(sheet, row) {
+  if (!row || !row.siteId) throw new Error("상담 저장번호가 없습니다.");
+  const targetRow = findSiteIdRow(sheet, row.siteId);
+  if (!targetRow) return { ok:true, saved:[] };
+  verifySavedRow(sheet, targetRow, toValues(row));
+  return { ok:true, saved:[{ siteId:String(row.siteId), row:targetRow, verified:true }] };
 }
 
 function replaceAll(sheet, rows) {

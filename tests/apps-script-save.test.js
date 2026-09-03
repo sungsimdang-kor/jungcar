@@ -45,6 +45,7 @@ class FakeRange {
 
 class FakeSheet {
   constructor() { this.rows = []; }
+  getParent() { return { getSpreadsheetTimeZone:() => "America/Los_Angeles" }; }
   getLastRow() { return this.rows.length; }
   getRange(row, column, rowCount=1, columnCount=1) { return new FakeRange(this, row, column, rowCount, columnCount); }
   deleteRow(row) { this.rows.splice(row - 1, 1); }
@@ -69,7 +70,7 @@ const context = vm.createContext({
     }),
   },
   Utilities: {
-    formatDate: value => value.toISOString().slice(0, 10),
+    formatDate: (value, timeZone) => new Intl.DateTimeFormat("en-CA", { timeZone }).format(value),
   },
   Session: { getScriptTimeZone: () => "Asia/Seoul" },
 });
@@ -100,6 +101,18 @@ assert.equal(updated.saved[0].created, false, "같은 ID 재시도는 새 행을
 assert.equal(activeSheet.getLastRow(), 2, "같은 ID를 다시 저장해도 중복 행이 생기면 안 된다");
 assert.equal(activeSheet.rows[1][2], "010-9999-8888");
 assert.equal(activeSheet.rows[1][9], 3300);
+
+const beforeVerify = JSON.stringify(activeSheet.rows);
+const verified = context.verifyRowRequest(activeSheet, { ...original, phone:"010-9999-8888", budgetMax:3300 });
+assert.equal(verified.saved[0].verified, true);
+assert.equal(JSON.stringify(activeSheet.rows), beforeVerify, "응답 유실 확인은 시트를 수정하지 않아야 한다");
+assert.equal(context.verifyRowRequest(activeSheet, { ...original, siteId:"absent" }).saved.length, 0);
+assert.throws(() => context.verifyRowRequest(activeSheet, original), /연락처/, "불일치 항목 이름을 반환해야 한다");
+// 시트 시간대의 날짜만 비교해야 하며 스크립트 시간대에 따라 날짜가 바뀌면 안 됩니다.
+const originalStoredDate = activeSheet.rows[1][1];
+activeSheet.rows[1][1] = new Date("2026-09-03T20:00:00Z");
+context.verifyRowRequest(activeSheet, { ...original, phone:"010-9999-8888", budgetMax:3300 });
+activeSheet.rows[1][1] = originalStoredDate;
 
 lockAvailable = false;
 const blocked = context.upsertRows(activeSheet, [{ ...original, siteId:"site-test-2" }]);

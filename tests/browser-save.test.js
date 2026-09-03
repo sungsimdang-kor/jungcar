@@ -21,7 +21,7 @@ const { chromium } = require("playwright");
     const result = await syncUpsert({ id:"site-fallback", phone:"010-1111-2222", models:[] });
     return { calls, saved:result.saved[0].siteId };
   });
-  assert.deepEqual(fallbackResult.calls, ["post", "jsonp"], "POST 실패 시 같은 저장 ID로 JSONP를 재시도해야 한다");
+  assert.deepEqual(fallbackResult.calls, ["jsonp"], "일반 상담은 POST 대기 없이 한 번의 JSONP 요청으로 저장해야 한다");
   assert.equal(fallbackResult.saved, "site-fallback");
 
   const rejectsUnconfirmedSave = await page.evaluate(async () => {

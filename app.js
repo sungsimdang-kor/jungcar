@@ -629,10 +629,10 @@ function sheetJsonp(action, payload = {}) {
     if (payload.row) url.searchParams.set("row", JSON.stringify(payload.row));
     if (payload.siteId) url.searchParams.set("siteId", payload.siteId);
     const script = document.createElement("script");
-    const timeoutMs = action === "list" ? 90000 : 25000;
+    const timeoutMs = action === "list" ? 90000 : action === "upsert" ? 12000 : action === "verify" ? 10000 : 25000;
     const timeout = setTimeout(() => { cleanup(); reject(new Error("구글시트 응답 시간이 초과되었습니다.")); }, timeoutMs);
     function cleanup() { clearTimeout(timeout); delete window[callback]; script.remove(); }
-    window[callback] = (data) => { cleanup(); data?.ok === false ? reject(new Error(data.error || "구글시트 요청 실패")) : resolve(data); };
+    window[callback] = (data) => { cleanup(); data?.ok === false ? reject(Object.assign(new Error(data.error || "구글시트 요청 실패"), { serverResponse:true, code:data.code })) : resolve(data); };
     script.onerror = () => { cleanup(); reject(new Error("Apps Script URL을 불러오지 못했습니다.")); };
     script.src = url.toString();
     document.body.appendChild(script);
@@ -648,7 +648,7 @@ async function sheetPost(action, payload = {}, timeoutMs=12000) {
   try {
     const res = await fetch(settings.endpoint, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ sessionToken: session.sessionToken, action, ...payload }), signal: controller.signal });
     const data = await res.json();
-    if (!res.ok || data.ok === false) throw new Error(data.error || "구글시트 POST 요청 실패");
+    if (!res.ok || data.ok === false) throw Object.assign(new Error(data.error || "구글시트 POST 요청 실패"), { serverResponse:true, code:data.code });
     return data;
   } catch (error) {
     if (error?.name === "AbortError") throw new Error("구글시트 저장 응답이 지연되어 안전 재시도를 시작합니다.");
@@ -702,21 +702,24 @@ async function syncUpsert(row) {
   const settings = getSettings();
   if (!settings.endpoint || !session?.sessionToken) throw new Error("로그인 세션을 확인할 수 없습니다.");
   const sheetRow = rowForSheet(row);
-  let firstError;
-  for (const request of [
-    () => sheetPost("upsert", { row: sheetRow }),
-    () => sheetJsonp("upsert", { row: sheetRow }),
-  ]) {
+  const confirmed = result => result?.ok && result.saved?.some(saved => String(saved.siteId) === String(sheetRow.siteId));
+  // 일반 상담은 기존에 사용하던 JSONP로 바로 저장합니다. 긴 메모는 URL 제한을 피합니다.
+  const longPayload = encodeURIComponent(JSON.stringify(sheetRow)).length > 6000;
+  try {
+    const result = await (longPayload ? sheetPost("upsert", { row:sheetRow }) : sheetJsonp("upsert", { row:sheetRow }));
+    if (!confirmed(result)) throw new Error("서버의 저장 완료 확인이 누락되었습니다.");
+    return result;
+  } catch (writeError) {
+    // 서버가 명시적으로 거절한 요청은 통신 실패로 숨기거나 즉시 재전송하지 않습니다.
+    if (writeError.serverResponse) throw Object.assign(new Error(`저장을 확인하지 못했습니다. ${writeError.message}`), { retryable:false });
     try {
-      const result = await request();
-      const confirmed = result?.saved?.some(saved => String(saved.siteId) === String(sheetRow.siteId));
-      if (!result?.ok || !confirmed) throw new Error("구글시트에 기록된 값을 확인하지 못했습니다.");
-      return result;
-    } catch (error) {
-      firstError ||= error;
+      const result = await (longPayload ? sheetPost("verify", { row:sheetRow }) : sheetJsonp("verify", { row:sheetRow }));
+      if (confirmed(result)) return result;
+    } catch (verifyError) {
+      if (verifyError.serverResponse) throw Object.assign(new Error(`저장을 확인하지 못했습니다. ${verifyError.message}`), { retryable:false });
     }
+    throw new Error(`저장을 아직 확인하지 못했습니다. 입력 내용은 이 브라우저에 보관되며 다시 확인합니다. (${writeError.message || "통신 오류"})`);
   }
-  throw new Error(`저장을 확인하지 못했습니다. 입력 내용은 안전하게 보관되었으며 자동으로 다시 시도합니다. (${firstError?.message || "네트워크 오류"})`);
 }
 
 async function flushPendingSaves({ announce=false }={}) {
@@ -1110,7 +1113,7 @@ function openLeadForm(initialPhone="", existing=null) {
       saveInProgress=false;
       saveButton.disabled=false;
       saveButton.textContent=detectedCustomer ? "추가 상담 기록 저장" : "저장";
-      schedulePendingRetry();
+      if (error.retryable !== false) schedulePendingRetry();
       alert(error?.message || "저장을 확인하지 못했습니다. 입력 내용은 현재 창에 그대로 남아 있습니다.");
     }
   };
