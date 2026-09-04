@@ -428,17 +428,26 @@ function renderAnalysis() {
         <label>시작일<input name="dateFrom" type="date" value="${escapeHtml(analysisFilters.dateFrom || "")}"></label>
         <label>종료일<input name="dateTo" type="date" value="${escapeHtml(analysisFilters.dateTo || "")}"></label>
         ${option("문의 종류", "inquiryType", leads.map(r => r.inquiryType))}
-        ${option("희망 차종", "model", leads.flatMap(r => r.models || []))}
+        ${formField("희망 차종", modelControl("model", analysisFilters.model || "", "차종 입력 · 비우면 전체"))}
         ${option("할부 여부", "financeStatus", leads.map(r => r.financeStatus || "미확인"))}
         ${option("방문 여부", "visitStatus", leads.map(r => r.visitStatus || "미확인"))}
         <label>최대 예산(만원)<input name="budgetMax" type="number" min="0" step="100" value="${escapeHtml(analysisFilters.budgetMax || "")}" placeholder="예: 3000"></label>
       </form>
     </section>
     <div id="analysisResults"></div>`;
-  $("#analysisForm").addEventListener("input", () => {
+  const updateAnalysisFilters=() => {
     analysisFilters = Object.fromEntries(new FormData($("#analysisForm")).entries());
     renderAnalysisResults();
+  };
+  $("#analysisForm").addEventListener("input", updateAnalysisFilters);
+  $("#analysisForm").addEventListener("change", updateAnalysisFilters);
+  $("#analysisForm").addEventListener("submit", event => event.preventDefault());
+  const analysisModels=[...CAR_MODELS];
+  const knownModels=new Set(analysisModels.map(item=>item.name));
+  uniq(leads.flatMap(row=>row.models||[])).forEach(name=>{
+    if(!knownModels.has(name))analysisModels.push({name,maker:"기존 상담 차종"});
   });
+  bindModelAutocomplete($("#analysisForm"), {catalog:analysisModels,completeOnBlur:false});
   $("#resetAnalysis").onclick = () => { analysisFilters = {}; renderAnalysis(); };
   $("#exportAnalysisPng").onclick = exportAnalysisPng;
   $("#printAnalysis").onclick = printAnalysisReport;
@@ -533,6 +542,7 @@ async function exportAnalysisPng() {
 function filteredAnalysisRows() {
   const f = analysisFilters;
   const term = String(f.search || "").trim().toLowerCase();
+  const modelTerm = String(f.model || "").trim().toLocaleLowerCase("ko-KR");
   return leads.filter(r => {
     const searchable = [
       r.inquiryDate, r.phone, r.inquiryType, ...(r.models || []),
@@ -543,7 +553,7 @@ function filteredAnalysisRows() {
     if (f.dateFrom && (r.inquiryDate || "") < f.dateFrom) return false;
     if (f.dateTo && (r.inquiryDate || "") > f.dateTo) return false;
     if (f.inquiryType && r.inquiryType !== f.inquiryType) return false;
-    if (f.model && !(r.models || []).includes(f.model)) return false;
+    if (modelTerm && !(r.models || []).some(model => String(model).toLocaleLowerCase("ko-KR").includes(modelTerm))) return false;
     if (f.financeStatus && (r.financeStatus || "미확인") !== f.financeStatus) return false;
     if (f.visitStatus && (r.visitStatus || "미확인") !== f.visitStatus) return false;
     if (f.budgetMax && Number(r.budgetMax || Infinity) > Number(f.budgetMax)) return false;
@@ -773,7 +783,7 @@ function resolveFirstModelMatch(input) {
   }
   return match?.name||"";
 }
-function bindModelAutocomplete(root) {
+function bindModelAutocomplete(root, {catalog=CAR_MODELS,completeOnBlur=true}={}) {
   root.querySelectorAll("[data-model-autocomplete]").forEach(input => {
     const menu = input.parentElement.querySelector(".model-suggestions");
     const closeMenu = () => {
@@ -793,7 +803,7 @@ function bindModelAutocomplete(root) {
         closeMenu();
         return;
       }
-      const matches = CAR_MODELS.filter(item => item.name.toLocaleLowerCase("ko-KR").includes(query)).slice(0, 15);
+      const matches = catalog.filter(item => item.name.toLocaleLowerCase("ko-KR").includes(query)).slice(0, 15);
       if (!matches.length) {
         menu.innerHTML = `<p>일치하는 모델이 없습니다.</p>`;
       } else {
@@ -814,12 +824,15 @@ function bindModelAutocomplete(root) {
       if (event.key === "Escape") closeMenu();
       if (event.key === "Enter" && !menu.hidden) {
         event.preventDefault();
-        resolveFirstModelMatch(input);
+        const query=input.value.trim().toLocaleLowerCase("ko-KR");
+        const match=catalog.find(item=>item.name.toLocaleLowerCase("ko-KR")===query)
+          || catalog.find(item=>item.name.toLocaleLowerCase("ko-KR").includes(query));
+        if(match)selectModel(match.name);
         closeMenu();
       }
     });
     input.addEventListener("blur", () => setTimeout(() => {
-      resolveFirstModelMatch(input);
+      if(completeOnBlur)resolveFirstModelMatch(input);
       closeMenu();
     }, 120));
   });
