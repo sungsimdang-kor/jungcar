@@ -935,7 +935,13 @@ function openLeadForm(initialPhone="", existing=null) {
   bindModelAutocomplete(dlg);
   requestAnimationFrame(() => dlg.querySelector('[name="phone"]')?.focus({ preventScroll:true }));
   const conditionInput=dlg.querySelector('[name="conditionRaw"]');
+  const applyInquiryTypeFromCondition=()=>{
+    if (conditionInput.value.replace(/\s+/g," ").includes("판매 후 구매 희망")) {
+      setControlValue("inquiryType","판매 후 구매");
+    }
+  };
   conditionInput.addEventListener("input", () => {
+    applyInquiryTypeFromCondition();
     const inferred=budgetRangeFromCondition(conditionInput.value);
     if (inferred) {
       dlg.querySelector('[name="budgetMax"]').value=formatThousands(inferred.max);
@@ -948,6 +954,7 @@ function openLeadForm(initialPhone="", existing=null) {
     e.preventDefault();
     if (saveInProgress) return;
     dlg.querySelectorAll("[data-model-autocomplete]").forEach(resolveFirstModelMatch);
+    applyInquiryTypeFromCondition();
     const f=new FormData($("#leadForm"));
     const phone=normalizePhone(f.get("phone"));
     if (!validPhone(phone)) { alert("연락처를 010-0000-0000 형식으로 입력해 주세요."); return; }
