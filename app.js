@@ -676,7 +676,7 @@ function overviewInquiryFinance(typeEntries, financeCount, total, ratio) {
   return `<div class="overview-combined">
     ${donut(typeEntries, true)}
     <section class="overview-finance-block">
-      <header><h3>전체 DB 할부 문의 비율</h3><p>전체 상담 ${fmt(total)}건 기준</p></header>
+      <header><h3>전체 DB 할부 문의 비율</h3><p>할부 조회 요청 활성화 상담 ÷ 전체 상담 ${fmt(total)}건</p></header>
       ${financeSummary(financeCount, total, ratio)}
     </section>
   </div>`;
@@ -708,10 +708,12 @@ function customerDetail(c) {
     <div class="detail-head">
       <div class="detail-nav">
         <button id="back" class="secondary">← 고객 목록으로 돌아가기</button>
-        <button id="addCustomer" class="secondary">+ 다른 고객 추가</button>
       </div>
       <div><span>고객 식별번호</span><h2>${escapeHtml(c.phone)}</h2><p>최초 문의 ${c.firstInquiryDate || "-"} · 최근 문의 ${c.lastInquiryDate || "-"}</p></div>
-      <button id="addInquiry">+ 추가 상담 기록</button>
+      <div class="detail-nav">
+        <button id="addCustomer" class="secondary">신규 고객 추가</button>
+        <button id="addInquiry">+ 추가 상담 기록</button>
+      </div>
     </div>
     <section class="customer-summary">
       ${detailItem("전체 희망 차종", c.models.join(", "))}
@@ -846,7 +848,7 @@ function openLeadForm(initialPhone="", existing=null) {
       <p class="budget-hint">희망 조건에 ‘3000 초반’ 입력 시 최대 예산 3,300만원으로 자동 입력됩니다. 중반은 3,600만원, 후반은 3,900만원 기준입니다.</p>
     </div></section>
     <section class="form-section"><h3>상담 진행 정보</h3><div class="form-grid">
-      <div class="checkbox-field"><span>할부 여부</span><label class="inline-check status-check"><input name="financeStatus" type="checkbox" ${r.financeStatus==="예" ? "checked" : ""}> 할부 문의 있음</label></div>
+      <div class="checkbox-field"><span>할부 여부</span><label class="inline-check status-check"><input name="financeStatus" type="checkbox" ${r.financeStatus==="예" ? "checked" : ""}> 할부 조회 요청</label></div>
       <div class="checkbox-field"><span>방문 여부</span><label class="inline-check status-check"><input name="visitStatus" type="checkbox" ${r.visitStatus==="예" ? "checked" : ""}> 방문 예정·완료</label></div>
       ${formField("희망 조건·상담 메모", `<textarea name="conditionRaw" rows="4" placeholder="핵심 조건을 간략히 입력">${escapeHtml(r.conditionRaw||"")}</textarea>`, "full")}
     </div></section>
@@ -953,7 +955,7 @@ function openLeadForm(initialPhone="", existing=null) {
     const inferredBudget=budgetRangeFromCondition(conditionRaw);
     const budgetMax=inferredBudget?.max || parseFormattedNumber(f.get("budgetMax"));
     const inquiryType=String(f.get("inquiryType")||"구매").trim();
-    const financeStatus=conditionRaw.includes("할부") || f.get("financeStatus")==="on" ? "예" : "아니오";
+    const financeStatus=f.get("financeStatus")==="on" ? "예" : "아니오";
     const visitStatus=conditionRaw.includes("방문") || f.get("visitStatus")==="on" ? "예" : "아니오";
     const ancillaryIncluded=f.get("ancillaryIncluded")==="on";
     const topics=uniq([...(r.topics||[]).filter(t=>t && t!=="부대비용 포함"),...topicsFromText(conditionRaw,inquiryType,financeStatus),...(ancillaryIncluded?["부대비용 포함"]:[])]);
