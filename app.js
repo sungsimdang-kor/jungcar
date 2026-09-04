@@ -1,7 +1,6 @@
 
-const FIXED_APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwzmFAtSNUX9CB7BKELlcM95M76CuojmA8szFAlf9umhv1POGW1VC4QcA6ztltByEBy/exec";
-const LOGIN_USERNAME = "배찬오";
-const SESSION_KEY = "jungcar-session";
+const LOGIN_USERNAME = "admin";
+const SESSION_KEY = "jungcar-firebase-session";
 const LAST_INQUIRY_DATE_KEY = "jungcar-last-inquiry-date";
 const PENDING_DB_NAME = "jungcar-crm-safety";
 const PENDING_DB_VERSION = 1;
@@ -115,8 +114,7 @@ const topicsFromText = (conditionRaw = "", inquiryType = "", financeStatus = "")
   ];
   return rules.filter(([, words]) => words.some(word => raw.includes(word.toLowerCase()))).map(([label]) => label);
 };
-const getSettings = () => ({ endpoint: FIXED_APPS_SCRIPT_URL });
-const isLoggedIn = () => Boolean(session?.sessionToken && getSettings().endpoint);
+const isLoggedIn = () => Boolean(session?.sessionToken && window.JungcarFirebase);
 
 function openPendingDb() {
   if (!("indexedDB" in window)) return Promise.reject(new Error("안전 저장소를 사용할 수 없습니다. Chrome 브라우저 설정을 확인해 주세요."));
@@ -215,10 +213,11 @@ function rowForSheet(row) {
 }
 
 function saveLocal() {
-  // 고객 데이터는 GitHub Pages/localStorage에 남기지 않고 메모리와 구글시트에만 둡니다.
+  // 확정 원본은 Firebase에 있으며, 미확인 입력만 별도 outbox에 보관합니다.
 }
 
 async function loadData() {
+  if (!window.JungcarFirebase) return;
   if (isLoggedIn()) {
     dataLoading = true;
     render();
@@ -299,6 +298,7 @@ function renderLogin(message = "", busy = false) {
         <img class="login-logo" src="https://xn--tv-9z9j31p.com/assets/admin/images/logo/171/logo.png" alt="중카TV">
       </div>
       <form id="loginForm" aria-busy="${busy}">
+        <input name="username" type="hidden" value="admin" autocomplete="username">
         <label>비밀번호<input name="password" type="password" autocomplete="current-password" required ${busy ? "disabled" : ""}></label>
         <button type="submit" ${busy ? "disabled" : ""}>${busy ? "불러오는 중..." : "로그인"}</button>
         <p class="status">${escapeHtml(message)}</p>
@@ -323,7 +323,7 @@ async function login(event) {
   };
   try {
     const result = await sheetJsonp("login", credentials);
-    session = { sessionToken: result.sessionToken, endpoint: FIXED_APPS_SCRIPT_URL, loggedInAt: Date.now() };
+    session = { sessionToken: result.sessionToken, loggedInAt: Date.now() };
     status.textContent = "로그인되었습니다. 고객 데이터를 불러오는 중입니다.";
     leads = await sheetList(false);
     localStorage.setItem(SESSION_KEY, JSON.stringify(session));
@@ -340,6 +340,7 @@ async function login(event) {
 }
 
 function logout() {
+  window.JungcarFirebase?.logout().catch(()=>{});
   session = null;
   leads = [];
   localStorage.removeItem(SESSION_KEY);
@@ -409,7 +410,7 @@ function renderCustomers() {
     <section class="panel"><div id="customerTable" class="table">${customerTable(customers)}</div></section>`;
   $("#customerSearch").addEventListener("input", e => {
     const term = e.target.value.toLowerCase();
-    const filtered = customers.filter(c => `${c.phone} ${c.models.join(" ")} ${c.inquiryTypes.join(" ")} ${c.latestCondition}`.toLowerCase().includes(term));
+    const filtered = buildCustomers().filter(c => `${c.phone} ${c.models.join(" ")} ${c.inquiryTypes.join(" ")} ${c.latestCondition}`.toLowerCase().includes(term));
     $("#customerTable").innerHTML = customerTable(filtered);
     bindCustomerRows();
   });
@@ -587,140 +588,22 @@ function renderAnalysisResults() {
     </section>`;
 }
 
-function renderSettings() {
-  app.innerHTML = `
-    <section class="sync-hero">
-      <div><span>JUNGCAR CRM SETTINGS</span><h2>설정 및 백업</h2><p>데이터 동기화, 연결 확인, 백업과 로그아웃을 한곳에서 관리합니다.</p></div>
-      <div class="settings-summary"><b>Google Sheets</b><span>저장 확인 필수 사용 중</span></div>
-    </section>
-    <section class="panel sync-panel">
-      <h3>구글시트 연동</h3>
-      <p class="status">고객 저장은 구글시트에 기록된 값을 다시 확인한 후에만 완료됩니다.</p>
-      <div class="sync-buttons"><button id="testSync">연결 테스트</button><button id="pullSheet">시트 → 사이트 새로고침</button><button id="pushSheet">현재 사이트 → 시트 반영</button><button id="logout">로그아웃</button></div>
-      <p id="syncStatus" class="status"></p>
-      <hr>
-      <h3>데이터 백업</h3>
-      <p class="status">현재 구글시트에서 불러온 모든 상담 데이터를 CSV 파일로 저장합니다.</p>
-      <div class="sync-buttons"><button id="settingsExportCsv">CSV 백업 다운로드</button></div>
-    </section>`;
-  $("#testSync").onclick = async () => { await sheetList(true); };
-  $("#pullSheet").onclick = async () => { await pullFromSheet(); };
-  $("#pushSheet").onclick = async () => { await pushAllToSheet(); };
-  $("#logout").onclick = logout;
-  $("#settingsExportCsv").onclick = exportCsv;
-}
+function renderSettings() { return renderFirebaseSettings(); }
 
 function sheetJsonp(action, payload = {}) {
-  const settings = getSettings();
-  const endpoint = payload.endpoint || settings.endpoint;
-  if (!endpoint) return Promise.reject(new Error("Apps Script URL을 먼저 입력하세요."));
-  if (action !== "login" && !session?.sessionToken) return Promise.reject(new Error("로그인 후 이용하세요."));
-  return new Promise((resolve, reject) => {
-    const callback = `jungcar_cb_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-    const url = new URL(endpoint);
-    url.searchParams.set("action", action);
-    url.searchParams.set("callback", callback);
-    if (action === "login") {
-      url.searchParams.set("username", payload.username || "");
-      url.searchParams.set("password", payload.password || "");
-    } else {
-      url.searchParams.set("sessionToken", session.sessionToken);
-    }
-    if (payload.row) url.searchParams.set("row", JSON.stringify(payload.row));
-    if (payload.siteId) url.searchParams.set("siteId", payload.siteId);
-    const script = document.createElement("script");
-    const timeoutMs = action === "list" ? 90000 : action === "upsert" ? 12000 : action === "verify" ? 10000 : 25000;
-    const timeout = setTimeout(() => { cleanup(); reject(new Error("구글시트 응답 시간이 초과되었습니다.")); }, timeoutMs);
-    function cleanup() { clearTimeout(timeout); delete window[callback]; script.remove(); }
-    window[callback] = (data) => { cleanup(); data?.ok === false ? reject(Object.assign(new Error(data.error || "구글시트 요청 실패"), { serverResponse:true, code:data.code })) : resolve(data); };
-    script.onerror = () => { cleanup(); reject(new Error("Apps Script URL을 불러오지 못했습니다.")); };
-    script.src = url.toString();
-    document.body.appendChild(script);
-  });
+  if(action==='login') return window.JungcarFirebase.login(payload.password);
+  return Promise.reject(new Error('지원하지 않는 요청입니다.'));
 }
 
-async function sheetPost(action, payload = {}, timeoutMs=12000) {
-  const settings = getSettings();
-  if (!settings.endpoint) throw new Error("Apps Script URL이 설정되지 않았습니다.");
-  if (!session?.sessionToken) throw new Error("로그인 후 이용하세요.");
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(settings.endpoint, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ sessionToken: session.sessionToken, action, ...payload }), signal: controller.signal });
-    const data = await res.json();
-    if (!res.ok || data.ok === false) throw Object.assign(new Error(data.error || "구글시트 POST 요청 실패"), { serverResponse:true, code:data.code });
-    return data;
-  } catch (error) {
-    if (error?.name === "AbortError") throw new Error("구글시트 저장 응답이 지연되어 안전 재시도를 시작합니다.");
-    throw error;
-  } finally {
-    clearTimeout(timeout);
-  }
-}
+async function sheetPost() { throw new Error('기존 구글시트 연결은 사용하지 않습니다.'); }
 
-async function sheetList(showStatus=false) {
-  let data;
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    try {
-      data = await sheetJsonp("list");
-      break;
-    } catch (error) {
-      const retryable = /시간이 초과|불러오지 못했습니다/.test(error?.message || "");
-      if (!retryable || attempt === 1) throw error;
-      await new Promise(resolve => setTimeout(resolve, 700));
-    }
-  }
-  if (!Array.isArray(data?.rows)) throw new Error("구글시트 고객 데이터 형식이 올바르지 않습니다.");
-  if (showStatus) $("#syncStatus").textContent = `연결 성공 · 시트 ${fmt(data.rows?.length || 0)}건`;
-  return data.rows || [];
-}
+async function sheetList() { return window.JungcarFirebase.list(); }
 
-async function pullFromSheet() {
-  const status = $("#syncStatus");
-  status.textContent = "시트에서 새로고침 중...";
-  try {
-    const rows = await sheetList();
-    leads = rows;
-    status.textContent = `시트에서 ${fmt(rows.length)}건을 새로 불러왔습니다.`;
-  } catch (err) {
-    status.textContent = err.message;
-  }
-}
 
-async function pushAllToSheet() {
-  const status = $("#syncStatus");
-  status.textContent = "현재 데이터를 시트에 반영하는 중...";
-  try {
-    await sheetPost("replaceAll", { rows: leads.map(rowForSheet) });
-    status.textContent = `현재 사이트 데이터 ${fmt(leads.length)}건을 시트에 반영했습니다.`;
-  } catch (err) {
-    status.textContent = `${err.message} · 브라우저 CORS가 막히면 Apps Script 배포 권한을 '모든 사용자'로 확인하세요.`;
-  }
-}
 
-async function syncUpsert(row) {
-  const settings = getSettings();
-  if (!settings.endpoint || !session?.sessionToken) throw new Error("로그인 세션을 확인할 수 없습니다.");
-  const sheetRow = rowForSheet(row);
-  const confirmed = result => result?.ok && result.saved?.some(saved => String(saved.siteId) === String(sheetRow.siteId));
-  // 일반 상담은 기존에 사용하던 JSONP로 바로 저장합니다. 긴 메모는 URL 제한을 피합니다.
-  const longPayload = encodeURIComponent(JSON.stringify(sheetRow)).length > 6000;
-  try {
-    const result = await (longPayload ? sheetPost("upsert", { row:sheetRow }) : sheetJsonp("upsert", { row:sheetRow }));
-    if (!confirmed(result)) throw new Error("서버의 저장 완료 확인이 누락되었습니다.");
-    return result;
-  } catch (writeError) {
-    // 서버가 명시적으로 거절한 요청은 통신 실패로 숨기거나 즉시 재전송하지 않습니다.
-    if (writeError.serverResponse) throw Object.assign(new Error(`저장을 확인하지 못했습니다. ${writeError.message}`), { retryable:false });
-    try {
-      const result = await (longPayload ? sheetPost("verify", { row:sheetRow }) : sheetJsonp("verify", { row:sheetRow }));
-      if (confirmed(result)) return result;
-    } catch (verifyError) {
-      if (verifyError.serverResponse) throw Object.assign(new Error(`저장을 확인하지 못했습니다. ${verifyError.message}`), { retryable:false });
-    }
-    throw new Error(`저장을 아직 확인하지 못했습니다. 입력 내용은 이 브라우저에 보관되며 다시 확인합니다. (${writeError.message || "통신 오류"})`);
-  }
-}
+
+
+async function syncUpsert(row) { return window.JungcarFirebase.save(row); }
 
 async function flushPendingSaves({ announce=false }={}) {
   if (!isLoggedIn()) return { saved:0, pending:0 };
@@ -741,7 +624,7 @@ async function flushPendingSaves({ announce=false }={}) {
         return { saved, pending:pending.length - saved, error };
       }
     }
-    if (announce) showSyncNotice(`미확인 저장 ${fmt(saved)}건을 구글시트에 확인했습니다.`, "success");
+    if (announce) showSyncNotice(`미확인 저장 ${fmt(saved)}건을 Firebase에서 확인했습니다.`, "success");
     return { saved, pending:0 };
   })().finally(() => { pendingFlushPromise = null; });
   return pendingFlushPromise;
@@ -762,22 +645,9 @@ function schedulePendingRetry() {
 }
 
 async function syncDelete(siteId) {
-  const settings = getSettings();
-  if (!settings.endpoint || !session?.sessionToken) throw new Error("로그인 세션을 확인할 수 없습니다.");
-  let firstError;
-  for (const request of [
-    () => sheetPost("delete", { siteId }),
-    () => sheetJsonp("delete", { siteId }),
-  ]) {
-    try {
-      const result = await request();
-      if (!result?.ok || String(result.siteId) !== String(siteId)) throw new Error("구글시트 삭제 여부를 확인하지 못했습니다.");
-      return result;
-    } catch (error) {
-      firstError ||= error;
-    }
-  }
-  throw new Error(`삭제를 확인하지 못했습니다. 시트에서 확인되기 전까지 화면의 데이터는 유지됩니다. (${firstError?.message || "네트워크 오류"})`);
+  const current=leads.find(row=>String(row.id)===String(siteId));
+  if(!current) throw new Error('삭제할 상담을 찾을 수 없습니다.');
+  return window.JungcarFirebase.remove(current);
 }
 
 function kpi(label, value, detail) { return `<article class="kpi"><span>${label}</span><strong>${value}</strong><small>${detail}</small></article>`; }
@@ -848,7 +718,7 @@ function customerDetail(c) {
       ${detailItem("문의 종류", c.inquiryTypes.join(", "))}
       ${detailItem("방문 여부", c.visitStatus)}
     </section>
-    <div class="section-title"><div><h3>날짜별 상담 내역</h3><p>상담 한 건마다 모든 입력 정보가 구글시트의 한 행으로 저장됩니다.</p></div><b>${fmt(c.inquiries.length)}건</b></div>
+    <div class="section-title"><div><h3>날짜별 상담 내역</h3><p>상담별 입력 정보는 Firebase에 저장되며 실시간으로 반영됩니다.</p></div><b>${fmt(c.inquiries.length)}건</b></div>
     <div class="history">${c.inquiries.map(r => `<article>
       <header><div><strong>${r.inquiryDate || "날짜 없음"}</strong><span class="chip">${escapeHtml(r.inquiryType || "-")}</span></div><div class="history-actions"><button data-edit="${r.id}">수정</button><button class="danger" data-del="${r.id}">삭제</button></div></header>
       <div class="history-grid">
@@ -1150,7 +1020,64 @@ $$("[data-tab]").forEach(btn => btn.onclick = () => {
   selectedCustomer = null;
   render();
 });
-loadData();
+startFirebaseApp();
 window.addEventListener("online", () => {
   if (isLoggedIn()) resumePendingSaves();
 });
+
+function firebaseStatus(value){
+  const el=$('#storageConnection');if(!el)return;
+  const labels={login:'Firebase · 로그인 필요',connecting:'Firebase · 동기화 연결 중',connected:'Firebase · 실시간 동기화 연결됨',offline:'Firebase · 연결 끊김',saving:'Firebase · 저장 중',pending:'Firebase · 저장 확인 대기',error:'Firebase · 연결 확인 필요'};
+  el.className=`storage-connection ${value.status}`;
+  el.textContent=labels[value.status]||labels.connecting;
+  el.title=value.message||(value.at?`최근 서버 확인 ${new Date(value.at).toLocaleTimeString('ko-KR')} · 저장은 서버 확인 후 완료됩니다.`:'서버 연결을 확인하고 있습니다.');
+}
+function downloadFirebaseJson(value,name){
+  const url=URL.createObjectURL(new Blob([JSON.stringify(value,null,2)],{type:'application/json;charset=utf-8'}));
+  const a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+function renderFirebaseSettings(){
+  app.innerHTML=`<section class="panel sync-panel"><h2>Firebase 데이터 및 백업</h2>
+    <p>상담 기록은 Firebase에 저장되며, 다른 창의 변경 사항도 실시간으로 반영됩니다.</p>
+    <p>연결이 끊기거나 저장 확인이 지연되면 미확인 입력은 이 브라우저에 보관합니다. 서버 확인 전에는 저장 완료로 표시하지 않습니다.</p>
+    <div class="sync-buttons"><button id="firebaseCsv">CSV 백업</button><button id="firebaseJson">전체 상담 JSON 백업</button><button id="firebasePending">미확인 저장 내역 백업</button><button id="firebaseRetry">미확인 저장 다시 확인</button><button id="logout">로그아웃</button></div>
+    <p class="status" id="syncStatus">자동 백업 예약은 아직 설정되지 않았습니다. 필요한 경우 백업 파일을 내려받으세요.</p></section>`;
+  $('#firebaseCsv').onclick=exportCsv;
+  $('#firebaseJson').onclick=()=>downloadFirebaseJson(window.JungcarFirebase.export(),`jungcar-firebase-${today()}.json`);
+  $('#firebasePending').onclick=async()=>downloadFirebaseJson(await listPendingSaves(),`jungcar-pending-${today()}.json`);
+  $('#firebaseRetry').onclick=()=>resumePendingSaves();$('#logout').onclick=logout;
+}
+let firebaseRefreshPending=false;
+function refreshFirebaseView(){
+  if(!firebaseRefreshPending||!isLoggedIn()||loginInProgress||dataLoading||document.querySelector('dialog[open]'))return;
+  const search=$('#customerSearch');
+  if(activeTab==='customers'&&search){
+    // Update only the table while the user is searching; keep the input and cursor.
+    search.dispatchEvent(new Event('input'));firebaseRefreshPending=false;return;
+  }
+  if(activeTab==='analysis'){renderAnalysisResults();firebaseRefreshPending=false;return;}
+  if(isTextEntryTarget(document.activeElement))return;
+  firebaseRefreshPending=false;render();
+}
+document.addEventListener('focusout',()=>setTimeout(refreshFirebaseView,0));
+document.addEventListener('close',()=>setTimeout(refreshFirebaseView,0),true);
+async function startFirebaseApp(){
+  session=null;renderLogin('연결 준비 중…',true);
+  try{
+    const {connect}=await import('./firebase-client.mjs?v=20260904-1');
+    window.JungcarFirebase=connect(window.JUNGCAR_FIREBASE_CONFIG,{
+      status:firebaseStatus,
+      rows:rows=>{
+        leads=rows;
+        if(selectedCustomer)selectedCustomer=buildCustomers().find(c=>c.id===selectedCustomer.id)||null;
+        // Preserve open forms and refresh deferred updates after editing finishes.
+        firebaseRefreshPending=true;refreshFirebaseView();
+      },
+      error:error=>{if(isLoggedIn())showSyncNotice(error.message,'error',true);},
+      signedOut:()=>{session=null;leads=[];if(window.JungcarFirebase)renderLogin();}
+    });
+    if(await window.JungcarFirebase.restore()){
+      session={sessionToken:'firebase-auth'};await loadData();
+    }else renderLogin();
+  }catch(error){firebaseStatus({status:'error'});renderLogin('Firebase 연결 준비에 실패했습니다. 새로고침 후 다시 시도해 주세요.');}
+}

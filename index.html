@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>중카TV 고객 DB · Jungcar</title>
-  <meta name="description" content="중카TV 고객 문의, 희망 차종, 예산, 방문 여부를 관리하고 구글시트와 동기화하는 정적 CRM 대시보드">
-  <link rel="stylesheet" href="styles.css?v=20260903-1">
+  <meta name="description" content="중카TV 고객 상담 관리 대시보드">
+  <link rel="stylesheet" href="styles.css?v=20260904-firebase1">
 </head>
 <body>
   <main class="layout">
@@ -19,10 +19,11 @@
       <div class="side-foot"><button data-tab="settings" class="settings-button"><span class="settings-icon" aria-hidden="true">⚙</span><span>설정</span></button></div>
     </aside>
     <section class="main">
-      <header class="top"><div><p>사람을 남기자! 중카TV 고객 관리 DB</p><h1 class="page-title">고객 문의 현황</h1></div></header>
+      <header class="top"><div><p>사람을 남기자! 중카TV 고객 관리 DB</p><h1 class="page-title">고객 문의 현황</h1></div><div id="storageConnection" class="storage-connection" role="status" aria-live="polite">Firebase · 연결 준비 중</div></header>
       <div id="app"></div>
     </section>
   </main>
-  <script src="app.js?v=20260903-2"></script>
+  <script src="firebase-config.js?v=20260904-1"></script>
+  <script src="app.js?v=20260904-firebase1"></script>
 </body>
 </html>

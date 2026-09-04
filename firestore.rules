@@ -1,0 +1,44 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function staff() {
+      return request.auth != null && get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.active == true;
+    }
+    function validRecord(id) {
+      let d=request.resource.data;
+      return d.keys().hasOnly(['payload','version','deleted','updatedAt','updatedBy'])
+        && d.payload is map && d.payload.id == id && d.version is int
+        && d.deleted is bool && d.updatedAt == request.time && d.updatedBy == request.auth.uid;
+    }
+    function matchingHistory(id) {
+      let d=request.resource.data;
+      let h=getAfter(/databases/$(database)/documents/consultations/$(id)/history/$(string(d.version))).data;
+      return h.after == d.payload && h.version == d.version && h.deleted == d.deleted
+        && h.actor == request.auth.uid && h.at == request.time;
+    }
+    match /consultations/{id} {
+      allow read: if staff();
+      allow create: if staff() && validRecord(id) && request.resource.data.version == 1
+        && request.resource.data.deleted == false && matchingHistory(id);
+      allow update: if staff() && validRecord(id) && !resource.data.deleted
+        && request.resource.data.version == resource.data.version + 1 && matchingHistory(id);
+      allow delete: if false;
+      match /history/{version} {
+        allow read: if staff();
+        allow create: if staff()
+          && request.resource.data.keys().hasOnly(['before','after','version','deleted','at','actor'])
+          && request.resource.data.version == int(version)
+          && request.resource.data.actor == request.auth.uid && request.resource.data.at == request.time
+          && getAfter(/databases/$(database)/documents/consultations/$(id)).data.version == int(version)
+          && getAfter(/databases/$(database)/documents/consultations/$(id)).data.payload == request.resource.data.after
+          && getAfter(/databases/$(database)/documents/consultations/$(id)).data.deleted == request.resource.data.deleted
+          && ((!exists(/databases/$(database)/documents/consultations/$(id)) && request.resource.data.before == null)
+            || (exists(/databases/$(database)/documents/consultations/$(id)) && request.resource.data.before == get(/databases/$(database)/documents/consultations/$(id)).data.payload));
+        allow update, delete: if false;
+      }
+    }
+    match /staff/{uid} { allow read: if request.auth != null && request.auth.uid == uid; allow write: if false; }
+    match /system/{id} { allow read: if staff(); allow write: if false; }
+    match /{document=**} { allow read, write: if false; }
+  }
+}

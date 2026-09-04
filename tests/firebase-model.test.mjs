@@ -1,0 +1,12 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {canonical,planSave} from '../firebase-model.mjs';
+const payload={id:'test-record',phone:'010-0000-0000',models:['쏘나타'],budgetMax:1300};
+test('new consultation starts at version 1',()=>assert.deepEqual(planSave(null,payload,0,false),{alreadySaved:false,version:1}));
+test('same request after lost response does not write twice',()=>assert.deepEqual(planSave({payload,version:1,deleted:false},payload,0,false),{alreadySaved:true,version:1}));
+test('changes increment version',()=>assert.equal(planSave({payload,version:1,deleted:false},{...payload,budgetMax:1500},1,false).version,2));
+test('stale edits cannot overwrite another employee',()=>assert.throws(()=>planSave({payload,version:3,deleted:false},payload,1,false),e=>e.retryable===false));
+test('deleted records cannot be resurrected by retry',()=>assert.throws(()=>planSave({payload,version:2,deleted:true},payload,2,false)));
+test('delete retry is idempotent',()=>assert.equal(planSave({payload,version:2,deleted:true},payload,1,true).alreadySaved,true));
+test('intentional repeated call uses a separate id',()=>assert.equal(planSave(null,{...payload,id:'another-call'},0,false).version,1));
+test('key order does not affect equality',()=>assert.equal(canonical({b:2,a:1}),canonical({a:1,b:2})));
