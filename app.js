@@ -996,17 +996,18 @@ function exportCsv() { const csv=["문의 날짜,연락처,문의 종류,희망 
 function escapeHtml(v) { return String(v ?? "").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c])); }
 const isTextEntryTarget = target => target instanceof HTMLElement && (target.matches("input, textarea, select") || target.isContentEditable);
 document.addEventListener("keydown", event => {
-  if (event.isComposing || event.repeat) return;
   const leadDialog=document.querySelector("dialog.lead-modal[open]");
+  if (event.code==="KeyS" && event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey && leadDialog) {
+    event.preventDefault();
+    if (event.isComposing || event.repeat) return;
+    const saveButton=leadDialog.querySelector("#saveLead");
+    if (saveButton && !saveButton.disabled) saveButton.click();
+    return;
+  }
+  if (event.isComposing || event.repeat) return;
   if (event.key==="Escape" && leadDialog) {
     event.preventDefault();
     leadDialog.close();
-    return;
-  }
-  if (event.code==="KeyS" && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && leadDialog && !isTextEntryTarget(event.target)) {
-    event.preventDefault();
-    const saveButton=leadDialog.querySelector("#saveLead");
-    if (saveButton && !saveButton.disabled) saveButton.click();
     return;
   }
   if (event.code==="KeyN" && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && !leadDialog && !isTextEntryTarget(event.target) && !loginInProgress && !dataLoading && isLoggedIn()) {
