@@ -1,0 +1,16 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import vm from 'node:vm';
+const source=fs.readFileSync(new URL('../app.js',import.meta.url),'utf8');
+const start=source.indexOf('function filterAndSortCustomers('),end=source.indexOf('\nfunction renderCustomerResults',start);
+const context={};vm.runInNewContext(source.slice(start,end),context);
+const row=(id,budget,extra={})=>({id,phone:`010-0000-000${id}`,lastInquiryDate:'2026-09-05',firstInquiryDate:'2026-07-01',models:['GV70'],inquiryTypes:['구매'],visitStatus:'예',latestCondition:'흰색 무사고',inquiries:[{budgetMax:budget}],...extra});
+const rows=[row('1',900),row('2',2000,{models:['아반떼'],visitStatus:'아니오'}),row('3',null,{lastInquiryDate:'',latestCondition:''}),row('4',10000,{lastInquiryDate:'2026-09-04'})];
+const ids=(filters={},key='budget',direction='asc')=>Array.from(context.filterAndSortCustomers(rows,filters,{key,direction}),r=>r.id);
+test('budget sorting is numeric and missing values stay last in either direction',()=>{assert.deepEqual(ids(),['1','2','4','3']);assert.deepEqual(ids({},'budget','desc'),['4','2','1','3']);});
+test('combined phone, model, type, visit, date, condition and budget filters use AND',()=>assert.deepEqual(ids({phone:'01000000001',model:'gv',inquiryType:'구매',visitStatus:'예',lastFrom:'2026-09-05',lastTo:'2026-09-05',firstFrom:'2026-07-01',firstTo:'2026-07-01',condition:'무사고',budgetMax:'1000'}),['1']));
+test('date filter excludes missing dates and respects inclusive boundaries',()=>assert.deepEqual(ids({lastFrom:'2026-09-04',lastTo:'2026-09-04'}),['4']));
+test('budget cap excludes missing budgets',()=>assert.deepEqual(ids({budgetMax:'2000'}),['1','2']));
+test('clearing filters restores customers and sorting does not mutate source',()=>{assert.equal(ids().length,4);assert.deepEqual(rows.map(r=>r.id),['1','2','3','4']);});
+test('text columns and dates support both directions',()=>{for(const key of ['phone','lastInquiryDate','firstInquiryDate','models','inquiryTypes','visitStatus','latestCondition']){assert.equal(ids({},key,'asc').length,4);assert.equal(ids({},key,'desc').length,4);}assert.deepEqual(ids({},'phone','desc'),['4','3','2','1']);});

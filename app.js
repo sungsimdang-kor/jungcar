@@ -10,6 +10,8 @@ let activeTab = "overview";
 let selectedCustomer = null;
 let session = JSON.parse(localStorage.getItem(SESSION_KEY) || "null");
 let analysisFilters = {};
+let customerFilters = {};
+let customerSort = {key:"lastInquiryDate",direction:"desc"};
 let loginInProgress = false;
 let dataLoading = false;
 let htmlToImagePromise = null;
@@ -403,19 +405,77 @@ function renderCustomers() {
       ${kpi("방문·예약 고객", `${fmt(customers.filter(c => c.visitStatus === "예").length)}명`, "방문 여부 예")}
       ${kpi("최근 고객", customers[0]?.phone || "-", customers[0]?.lastInquiryDate || "최근 상담일 없음")}
     </section>
-    <section class="toolbar">
-      <input id="customerSearch" placeholder="전화번호·차종·희망 조건 검색">
-      <button id="addLead">+ 고객 추가</button>
+    <section class="panel analysis-filter customer-filter">
+      <div class="filter-heading"><div><h2>고객 검색 조건</h2><p>조건을 함께 적용합니다. 날짜·예산·희망 조건은 아래 목록에 표시되는 값 기준입니다.</p></div><div class="filter-actions"><button type="button" id="resetCustomerFilters" class="secondary">필터 초기화</button><button id="addLead">+ 고객 추가</button></div></div>
+      <form id="customerFilterForm" class="filter-grid">
+        ${formField("연락처", `<input name="phone" inputmode="tel" value="${escapeHtml(customerFilters.phone||"")}" placeholder="번호 일부 · 하이픈 없이 검색 가능">`)}
+        ${formField("희망 차종", modelControl("model",customerFilters.model||"","차종 입력 · 비우면 전체"))}
+        <label>문의 종류<select name="inquiryType"><option value="">전체</option>${uniq(leads.map(r=>r.inquiryType)).sort().map(value=>`<option value="${escapeHtml(value)}" ${selected(customerFilters.inquiryType,value)}>${escapeHtml(value)}</option>`).join("")}</select></label>
+        <label>방문 여부<select name="visitStatus"><option value="">전체</option>${["예","아니오","미확인"].map(value=>`<option value="${value}" ${selected(customerFilters.visitStatus,value)}>${value}</option>`).join("")}</select></label>
+        ${formField("최근 상담일 · 시작", `<input name="lastFrom" type="date" value="${escapeHtml(customerFilters.lastFrom||"")}">`)}
+        ${formField("최근 상담일 · 종료", `<input name="lastTo" type="date" value="${escapeHtml(customerFilters.lastTo||"")}">`)}
+        ${formField("최초 문의일 · 시작", `<input name="firstFrom" type="date" value="${escapeHtml(customerFilters.firstFrom||"")}">`)}
+        ${formField("최초 문의일 · 종료", `<input name="firstTo" type="date" value="${escapeHtml(customerFilters.firstTo||"")}">`)}
+        ${formField("최근 예산 상한(만원)", `<input name="budgetMax" type="number" min="0" value="${escapeHtml(customerFilters.budgetMax||"")}" placeholder="예: 3000 이하">`)}
+        ${formField("최근 희망 조건", `<input name="condition" value="${escapeHtml(customerFilters.condition||"")}" placeholder="희망 조건에 포함된 단어">`)}
+      </form>
     </section>
-    <section class="panel"><div id="customerTable" class="table">${customerTable(customers)}</div></section>`;
-  $("#customerSearch").addEventListener("input", e => {
-    const term = e.target.value.toLowerCase();
-    const filtered = buildCustomers().filter(c => `${c.phone} ${c.models.join(" ")} ${c.inquiryTypes.join(" ")} ${c.latestCondition}`.toLowerCase().includes(term));
-    $("#customerTable").innerHTML = customerTable(filtered);
-    bindCustomerRows();
-  });
+    <section class="panel"><p id="customerResultCount" class="customer-result-count" role="status" aria-live="polite"></p><div id="customerTable" class="table"></div></section>`;
+  const form=$("#customerFilterForm");
+  const update=()=>{customerFilters=Object.fromEntries(new FormData(form).entries());renderCustomerResults();};
+  form.addEventListener("input",update);
+  form.addEventListener("change",update);
+  form.addEventListener("submit",event=>event.preventDefault());
+  const catalog=[...CAR_MODELS];
+  const known=new Set(catalog.map(item=>item.name));
+  uniq(leads.flatMap(row=>row.models||[])).forEach(name=>{if(!known.has(name))catalog.push({name,maker:"기존 상담 차종"});});
+  bindModelAutocomplete(form,{catalog,completeOnBlur:false});
+  $("#resetCustomerFilters").onclick=()=>{customerFilters={};renderCustomers();};
   $("#addLead").onclick = () => openLeadForm();
+  renderCustomerResults();
+}
+
+function filterAndSortCustomers(customers, filters=customerFilters, sort=customerSort) {
+  const text=value=>String(value||"").trim().toLocaleLowerCase("ko-KR");
+  const phone=String(filters.phone||"").replace(/\D/g,"");
+  const model=text(filters.model),condition=text(filters.condition);
+  const budget=c=>c.inquiries?.[0]?.budgetMax;
+  const rows=customers.filter(c=>{
+    if(phone&&!String(c.phone).replace(/\D/g,"").includes(phone))return false;
+    if(model&&!c.models.some(value=>text(value).includes(model)))return false;
+    if(filters.inquiryType&&!c.inquiryTypes.includes(filters.inquiryType))return false;
+    if(filters.visitStatus&&(c.visitStatus||"미확인")!==filters.visitStatus)return false;
+    if(condition&&!text(c.latestCondition).includes(condition))return false;
+    for(const [field,from,to] of [["lastInquiryDate","lastFrom","lastTo"],["firstInquiryDate","firstFrom","firstTo"]]){
+      if((filters[from]||filters[to])&&!c[field])return false;
+      if(filters[from]&&c[field]<filters[from])return false;
+      if(filters[to]&&c[field]>filters[to])return false;
+    }
+    if(filters.budgetMax!==undefined&&filters.budgetMax!==""&&filters.budgetMax!==null){
+      if(budget(c)==null||budget(c)===""||Number(budget(c))>Number(filters.budgetMax))return false;
+    }
+    return true;
+  });
+  const value=c=>sort.key==="budget"?budget(c):sort.key==="models"?c.models.join(", "):sort.key==="inquiryTypes"?c.inquiryTypes.join(", "):sort.key==="phone"?String(c.phone).replace(/\D/g,""):c[sort.key];
+  return rows.sort((a,b)=>{
+    const av=value(a),bv=value(b),empty=v=>v==null||v==="";
+    if(empty(av)!==empty(bv))return empty(av)?1:-1;
+    const comparison=sort.key==="budget"?Number(av||0)-Number(bv||0):String(av||"").localeCompare(String(bv||""),"ko",{numeric:true});
+    return comparison*(sort.direction==="asc"?1:-1)||String(a.id).localeCompare(String(b.id));
+  });
+}
+
+function renderCustomerResults(){
+  const all=buildCustomers(),rows=filterAndSortCustomers(all);
+  $("#customerResultCount").textContent=`검색 결과 ${fmt(rows.length)}명 / 전체 ${fmt(all.length)}명 · 열 제목을 누르면 정렬 방향이 바뀝니다.`;
+  $("#customerTable").innerHTML=customerTable(rows);
   bindCustomerRows();
+  $$("#customerTable [data-customer-sort]").forEach(button=>button.onclick=()=>{
+    const key=button.dataset.customerSort;
+    customerSort={key,direction:customerSort.key===key&&customerSort.direction==="asc"?"desc":"asc"};
+    renderCustomerResults();
+    $(`#customerTable [data-customer-sort="${key}"]`)?.focus({preventScroll:true});
+  });
 }
 
 function renderAnalysis() {
@@ -700,7 +760,14 @@ function budgetBars(entries) {
   </div>`).join("")}</div>`;
 }
 function inquiryTable(rows) { return `<div class="table"><table><thead><tr><th>문의일</th><th>전화번호</th><th>문의 종류</th><th>차종</th><th>예산</th><th>할부</th><th>방문</th><th>희망 조건</th></tr></thead><tbody>${rows.map(r => `<tr><td>${r.inquiryDate||"-"}</td><td>${normalizePhone(r.phone||"")}</td><td><span class="chip">${escapeHtml(r.inquiryType||"-")}</span></td><td><b>${escapeHtml((r.models||[]).join(", ")||"-")}</b></td><td>${escapeHtml(budgetLabel(r))}</td><td>${r.financeStatus||"미확인"}</td><td>${r.visitStatus||"미확인"}</td><td>${escapeHtml(r.conditionRaw||"-")}</td></tr>`).join("")}</tbody></table></div>`; }
-function customerTable(customers) { return `<table class="customers"><thead><tr><th>연락처</th><th>최근 상담일</th><th>최초 문의일</th><th>희망 차종</th><th>문의 종류</th><th>최근 예산</th><th>방문</th><th>최근 희망 조건</th><th>상담 추가</th></tr></thead><tbody>${customers.map(c => `<tr data-customer="${c.id}"><td><button class="link">${c.phone}</button></td><td>${c.lastInquiryDate||"-"}</td><td>${c.firstInquiryDate||"-"}</td><td><b>${escapeHtml(c.models.join(", ")||"-")}</b></td><td>${c.inquiryTypes.map(t=>`<span class="chip">${escapeHtml(t)}</span>`).join("")}</td><td>${escapeHtml(c.budgetLabel)}</td><td>${c.visitStatus}</td><td>${escapeHtml(c.latestCondition||"-")}</td><td><button class="quick-add" data-add-inquiry="${c.id}">+ 상담 추가</button></td></tr>`).join("")}</tbody></table>`; }
+function customerTable(customers) {
+  const columns=[["phone","연락처"],["lastInquiryDate","최근 상담일"],["firstInquiryDate","최초 문의일"],["models","희망 차종"],["inquiryTypes","문의 종류"],["budget","최근 예산"],["visitStatus","방문"],["latestCondition","최근 희망 조건"]];
+  const headings=columns.map(([key,label])=>{
+    const active=customerSort.key===key,ascending=customerSort.direction==="asc";
+    return `<th scope="col" aria-sort="${active?(ascending?"ascending":"descending"):"none"}"><button type="button" class="customer-sort" data-customer-sort="${key}" aria-label="${label} ${active&&ascending?"내림차순":"오름차순"} 정렬">${label}<span aria-hidden="true">${active?(ascending?"↑":"↓"):"↕"}</span></button></th>`;
+  }).join("");
+  return `<table class="customers"><thead><tr>${headings}<th scope="col">상담 추가</th></tr></thead><tbody>${customers.map(c => `<tr data-customer="${escapeHtml(c.id)}"><td><button class="link">${escapeHtml(c.phone)}</button></td><td>${escapeHtml(c.lastInquiryDate||"-")}</td><td>${escapeHtml(c.firstInquiryDate||"-")}</td><td><b>${escapeHtml(c.models.join(", ")||"-")}</b></td><td>${c.inquiryTypes.map(t=>`<span class="chip">${escapeHtml(t)}</span>`).join("")}</td><td>${escapeHtml(c.budgetLabel)}</td><td>${escapeHtml(c.visitStatus)}</td><td>${escapeHtml(c.latestCondition||"-")}</td><td><button class="quick-add" data-add-inquiry="${escapeHtml(c.id)}">+ 상담 추가</button></td></tr>`).join("")||'<tr><td colspan="9">검색 조건에 맞는 고객이 없습니다.</td></tr>'}</tbody></table>`;
+}
 function bindCustomerRows() {
   $$("#customerTable tr[data-customer]").forEach(tr => tr.onclick = () => {
     selectedCustomer = buildCustomers().find(c => c.id === tr.dataset.customer);
@@ -1073,10 +1140,10 @@ function renderFirebaseSettings(){
 let firebaseRefreshPending=false;
 function refreshFirebaseView(){
   if(!firebaseRefreshPending||!isLoggedIn()||loginInProgress||dataLoading||document.querySelector('dialog[open]'))return;
-  const search=$('#customerSearch');
+  const search=$('#customerFilterForm');
   if(activeTab==='customers'&&search){
     // Update only the table while the user is searching; keep the input and cursor.
-    search.dispatchEvent(new Event('input'));firebaseRefreshPending=false;return;
+    renderCustomerResults();firebaseRefreshPending=false;return;
   }
   if(activeTab==='analysis'){renderAnalysisResults();firebaseRefreshPending=false;return;}
   if(isTextEntryTarget(document.activeElement))return;
