@@ -10,7 +10,8 @@ let activeTab = "overview";
 let selectedCustomer = null;
 let session = JSON.parse(localStorage.getItem(SESSION_KEY) || "null");
 let analysisFilters = {};
-let comparisonFilters = [{},{}];
+let analysisCompareEnabled = false;
+let comparisonFilter = null;
 let customerFilters = {};
 let customerSort = {key:"lastInquiryDate",direction:"desc"};
 let loginInProgress = false;
@@ -281,12 +282,11 @@ function render() {
   $(".top").classList.remove("login-top");
   $$("[data-tab]").forEach(btn => btn.classList.toggle("active", btn.dataset.tab === activeTab));
   if ($(".total-count")) $(".total-count").textContent = `${fmt(leads.length)}건`;
-  $(".page-title").textContent = activeTab === "overview" ? "고객 문의 현황" : activeTab === "customers" ? "전체 고객" : activeTab === "analysis" ? "고객 문의 분석" : activeTab === "comparison" ? "조건별 비교" : activeTab === "reports" ? "월간·분기 리포트" : "설정";
+  $(".page-title").textContent = activeTab === "overview" ? "고객 문의 현황" : activeTab === "customers" ? "전체 고객" : activeTab === "analysis" ? "고객 문의 분석" : activeTab === "reports" ? "기간별 리포트" : "설정";
   selectedCustomer = selectedCustomer && buildCustomers().find(c => c.id === selectedCustomer.id) || null;
   if (activeTab === "overview") renderOverview();
   if (activeTab === "customers") renderCustomers();
   if (activeTab === "analysis") renderAnalysis();
-  if (activeTab === "comparison") renderComparison();
   if (activeTab === "reports") window.JungcarBusinessReports.mount();
   if (activeTab === "settings") renderSettings();
 }
@@ -499,12 +499,11 @@ function bindAnalysisModels(form){
 function renderAnalysis() {
   app.innerHTML = `
     <section class="analysis-filter panel">
-      <div class="filter-heading"><div><h2>분석 조건</h2><p>검색어나 조건을 바꾸면 아래 모든 지표와 차트가 함께 변경됩니다.</p></div><div class="filter-actions"><button type="button" id="resetAnalysis">초기화</button><button type="button" id="exportAnalysisPng">PNG 이미지 저장</button><button type="button" id="printAnalysis">PDF 파일 저장</button></div></div>
-      <form id="analysisForm" class="filter-grid">
-        ${analysisFilterFields(analysisFilters)}
-      </form>
+      <div class="filter-heading"><div><h2>분석 조건</h2><p>${analysisCompareEnabled?'A·B 조건을 비교합니다. 차이는 B − A 기준입니다.':'조건별 지표를 확인하고, 필요할 때 비교 조건을 추가하세요.'}</p></div><div class="filter-actions"><button type="button" id="toggleAnalysisCompare" aria-pressed="${analysisCompareEnabled}">${analysisCompareEnabled?'비교 해제':'비교 조건 추가'}</button>${analysisCompareEnabled?'<button type="button" id="swapAnalysisConditions">A ↔ B 바꾸기</button>':''}<button type="button" id="resetAnalysis">초기화</button><button type="button" id="exportAnalysisPng">PNG 이미지 저장</button><button type="button" id="printAnalysis">PDF 파일 저장</button></div></div>
+      <div class="analysis-conditions ${analysisCompareEnabled?'with-comparison':''}"><section>${analysisCompareEnabled?'<h3 class="analysis-condition-title cohort-a">A · 기준 조건</h3>':''}<form id="analysisForm" class="filter-grid">${analysisFilterFields(analysisFilters)}</form></section>
+      ${analysisCompareEnabled?`<section><h3 class="analysis-condition-title cohort-b">B · 비교 조건</h3><form id="analysisCompareForm" class="filter-grid">${analysisFilterFields(comparisonFilter||{})}</form></section>`:''}</div>
     </section>
-    <div id="analysisResults"></div>`;
+    <div id="analysisResults" aria-live="polite"></div>`;
   const updateAnalysisFilters=() => {
     analysisFilters = Object.fromEntries(new FormData($("#analysisForm")).entries());
     renderAnalysisResults();
@@ -513,7 +512,14 @@ function renderAnalysis() {
   $("#analysisForm").addEventListener("change", updateAnalysisFilters);
   $("#analysisForm").addEventListener("submit", event => event.preventDefault());
   bindAnalysisModels($("#analysisForm"));
-  $("#resetAnalysis").onclick = () => { analysisFilters = {}; renderAnalysis(); };
+  if(analysisCompareEnabled){
+    const form=$('#analysisCompareForm');
+    const update=()=>{comparisonFilter=Object.fromEntries(new FormData(form).entries());renderAnalysisResults();};
+    form.addEventListener('input',update);form.addEventListener('change',update);form.addEventListener('submit',event=>event.preventDefault());bindAnalysisModels(form);
+    $('#swapAnalysisConditions').onclick=()=>{[analysisFilters,comparisonFilter]=[comparisonFilter||{},analysisFilters];renderAnalysis();};
+  }
+  $('#toggleAnalysisCompare').onclick=()=>{analysisCompareEnabled=!analysisCompareEnabled;if(analysisCompareEnabled&&comparisonFilter===null)comparisonFilter={...analysisFilters};renderAnalysis();};
+  $("#resetAnalysis").onclick = () => { analysisFilters = {}; comparisonFilter={}; renderAnalysis(); };
   $("#exportAnalysisPng").onclick = exportAnalysisPng;
   $("#printAnalysis").onclick = printAnalysisReport;
   renderAnalysisResults();
@@ -540,11 +546,11 @@ function reportGeneratedAt() {
 }
 
 function printAnalysisReport() {
-  return window.JungcarReportExport.save({report:$("#analysisReport"),button:$("#printAnalysis"),format:"pdf",filename:`jungcar-analysis-${today()}`});
+  return window.JungcarReportExport.save({report:$(analysisCompareEnabled?'#comparisonReport':'#analysisReport'),button:$("#printAnalysis"),format:"pdf",filename:`jungcar-analysis${analysisCompareEnabled?'-comparison':''}-${today()}`});
 }
 
 function exportAnalysisPng() {
-  return window.JungcarReportExport.save({report:$("#analysisReport"),button:$("#exportAnalysisPng"),format:"png",filename:`jungcar-analysis-${today()}`});
+  return window.JungcarReportExport.save({report:$(analysisCompareEnabled?'#comparisonReport':'#analysisReport'),button:$("#exportAnalysisPng"),format:"png",filename:`jungcar-analysis${analysisCompareEnabled?'-comparison':''}-${today()}`});
 }
 
 function filteredAnalysisRows(f = analysisFilters) {
@@ -570,6 +576,11 @@ function filteredAnalysisRows(f = analysisFilters) {
 }
 
 function renderAnalysisResults() {
+  if(!$('#analysisResults'))return;
+  const invalid=[analysisFilters,...(analysisCompareEnabled?[comparisonFilter||{}]:[])].some(f=>f.dateFrom&&f.dateTo&&f.dateFrom>f.dateTo);
+  $('#exportAnalysisPng').disabled=invalid;$('#printAnalysis').disabled=invalid;
+  if(invalid){$('#analysisResults').innerHTML='<p class="panel comparison-note" role="alert">시작일이 종료일보다 늦습니다. 분석 기간을 확인해 주세요.</p>';return;}
+  if(analysisCompareEnabled){renderComparisonResults();return;}
   const rows = filteredAnalysisRows();
   const dated = rows.filter(r => parseDate(r.inquiryDate));
   const byDate = count(dated.map(r => r.inquiryDate));
@@ -606,26 +617,6 @@ function renderAnalysisResults() {
     </section>`;
 }
 
-function renderComparison(){
-  app.innerHTML=`<section class="comparison-intro"><div><h2>두 조건을 나란히 비교하세요</h2><p>기간·차종·문의 종류 등을 조합하면 결과가 바로 바뀝니다. 차이는 B − A 기준입니다.</p></div><div class="report-actions"><button id="swapComparison" class="secondary">A ↔ B 바꾸기</button><button id="comparisonPng">PNG 저장</button><button id="comparisonPdf">PDF 저장</button></div></section>
-    <section class="comparison-filters">${comparisonFilters.map((filters,index)=>`
-      <section class="panel comparison-filter comparison-${index}"><header><h3><span class="cohort-badge">${index?'B':'A'}</span> 비교 조건 ${index?'B':'A'}</h3><button type="button" class="secondary" data-reset-comparison="${index}">초기화</button></header>
-        <form id="comparisonForm${index}" class="filter-grid">${analysisFilterFields(filters)}</form>
-      </section>`).join('')}</section><div id="comparisonResults" aria-live="polite"></div>`;
-  comparisonFilters.forEach((_,index)=>{
-    const form=$(`#comparisonForm${index}`);
-    const update=()=>{comparisonFilters[index]=Object.fromEntries(new FormData(form).entries());renderComparisonResults();};
-    form.addEventListener('input',update);form.addEventListener('change',update);form.addEventListener('submit',event=>event.preventDefault());
-    bindAnalysisModels(form);
-  });
-  $$('[data-reset-comparison]').forEach(button=>button.onclick=()=>{comparisonFilters[Number(button.dataset.resetComparison)]={};renderComparison();});
-  $('#swapComparison').onclick=()=>{comparisonFilters.reverse();renderComparison();};
-  for(const format of ['png','pdf']){
-    const button=$(format==='png'?'#comparisonPng':'#comparisonPdf');
-    button.onclick=()=>window.JungcarReportExport.save({report:$('#comparisonReport'),button,format,filename:`jungcar-comparison-${today()}`});
-  }
-  renderComparisonResults();
-}
 function comparisonMetrics(rows,filters){
   const budgets=rows.map(row=>Number(row.budgetMax)).filter(value=>Number.isFinite(value)&&value>0);
   const dates=rows.map(row=>row.inquiryDate).filter(value=>parseDate(value)).sort();
@@ -655,12 +646,7 @@ function comparisonBars(a,b,totalA,totalB,labels){
   }).join('')}</div>`;
 }
 function renderComparisonResults(){
-  if(!$('#comparisonResults'))return;
-  if(comparisonFilters.some(f=>f.dateFrom&&f.dateTo&&f.dateFrom>f.dateTo)){
-    $('#comparisonPng').disabled=true;$('#comparisonPdf').disabled=true;
-    $('#comparisonResults').innerHTML='<p class="panel comparison-note" role="alert">시작일이 종료일보다 늦습니다. 비교 기간을 확인해 주세요.</p>';return;
-  }
-  $('#comparisonPng').disabled=false;$('#comparisonPdf').disabled=false;
+  const comparisonFilters=[analysisFilters,comparisonFilter||{}];
   const [a,b]=comparisonFilters.map(f=>filteredAnalysisRows(f));
   const [am,bm]=[comparisonMetrics(a,comparisonFilters[0]),comparisonMetrics(b,comparisonFilters[1])];
   const ids=new Set(a.map(r=>r.id)),overlap=b.filter(r=>ids.has(r.id)).length;
@@ -669,7 +655,7 @@ function renderComparisonResults(){
   const budgets=[count(a.map(budgetBand)),count(b.map(budgetBand))];
   const weekdays=[a,b].map(rows=>count(rows.filter(r=>parseDate(r.inquiryDate)).map(r=>weekdayLabels[new Date(r.inquiryDate+'T00:00:00Z').getUTCDay()])));
   const labels=(maps,limit)=>uniq(maps.flatMap(map=>Object.keys(map))).sort((x,y)=>((maps[0][y]||0)+(maps[1][y]||0))-((maps[0][x]||0)+(maps[1][x]||0))||x.localeCompare(y,'ko')).slice(0,limit);
-  $('#comparisonResults').innerHTML=`<section id="comparisonReport" class="comparison-report analysis-report"><section class="comparison-report-page" data-report-page><header class="analysis-report-header"><div><span>JUNGCAR · COMPARISON REPORT</span><h2>중카TV 조건별 비교 보고서</h2><p>${escapeHtml(reportGeneratedAt())} 생성</p></div><div class="analysis-report-filters"><strong>비교 기준</strong><p>A와 B의 상담 기록을 각각 집계 · 차이는 B − A</p></div></header><section class="comparison-condition-summary">${comparisonFilters.map((f,i)=>`<p><span class="cohort-badge ${i?'cohort-b':'cohort-a'}">${i?'B':'A'}</span>${escapeHtml(analysisFilterSummary(f))}</p>`).join('')}</section>
+  $('#analysisResults').innerHTML=`<section id="comparisonReport" class="comparison-report analysis-report"><section class="comparison-report-page" data-report-page><header class="analysis-report-header"><div><span>JUNGCAR · COMPARISON REPORT</span><h2>중카TV 조건별 비교 보고서</h2><p>${escapeHtml(reportGeneratedAt())} 생성</p></div><div class="analysis-report-filters"><strong>비교 기준</strong><p>A와 B의 상담 기록을 각각 집계 · 차이는 B − A</p></div></header><section class="comparison-condition-summary">${comparisonFilters.map((f,i)=>`<p><span class="cohort-badge ${i?'cohort-b':'cohort-a'}">${i?'B':'A'}</span>${escapeHtml(analysisFilterSummary(f))}</p>`).join('')}</section>
     <section class="comparison-metrics">
       ${comparisonMetric('상담 수',am.total,bm.total,'건')}
       ${comparisonMetric('고객 수',am.customers,bm.customers,'명')}
@@ -1176,7 +1162,6 @@ function refreshFirebaseView(){
     renderCustomerResults();firebaseRefreshPending=false;return;
   }
   if(activeTab==='analysis'){renderAnalysisResults();firebaseRefreshPending=false;return;}
-  if(activeTab==='comparison'){renderComparisonResults();firebaseRefreshPending=false;return;}
   if(activeTab==='reports'){window.JungcarBusinessReports.refresh();firebaseRefreshPending=false;return;}
   if(isTextEntryTarget(document.activeElement))return;
   firebaseRefreshPending=false;render();

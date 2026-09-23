@@ -25,11 +25,27 @@ test('metrics use unique phone numbers, nonempty budgets and enabled toggles',()
   const m=report.metrics([row('2026-09-01',{budgetMax:1000,financeStatus:'예'}),row('2026-09-03',{phone:'01012345678',visitStatus:'예'}),row('2026-09-03',{phone:'',budgetMax:-1})],'2026-09-01','2026-09-03');
   assert.equal(m.total,3);assert.equal(m.customers,1);assert.equal(m.averageBudget,1000);assert.equal(m.daily,1);assert.ok(Math.abs(m.finance-100/3)<1e-10);
 });
-test('report excludes invalid dates and future records and fills empty trend periods',()=>{
+test('report excludes invalid dates, future records and periods outside the selected range',()=>{
   const input=[row('2026-09-01'),row('2026-09-24'),row('2026-08-24'),row('2026-08-10'),row('2026-02-30'),row(''),row('2025-09-23')];
   const d=report.build(input,'month',2026,9,'2026-09-23');
   assert.equal(d.current.total,1);assert.equal(d.previous.total,1);assert.equal(d.lastYear.total,1);assert.equal(d.missingDates,2);
-  assert.equal(d.months.length,12);assert.equal(d.months.at(-1).total,1);assert.equal(d.months.at(-2).total,2);assert.equal(d.months[1].total,0);assert.equal(d.quarters.at(-1).partial,true);
+  assert.equal(d.months.length,1);assert.equal(d.months[0].total,1);assert.equal(d.months[0].from,'2026-09-01');assert.equal(d.quarters.length,1);assert.equal(d.quarters[0].partial,true);
+});
+test('empty months disappear without changing the true previous calendar month baseline',()=>{
+  const d=report.build([row('2026-06-01'),row('2026-07-01'),row('2026-07-02'),row('2026-09-03')],'quarter',2026,3,'2026-10-01');
+  assert.equal(d.current.total,3);assert.equal(d.months.length,2);assert.equal(d.months[0].index,7);assert.equal(d.months[1].index,9);
+  assert.equal(d.months[1].previousTotal,0);assert.equal(d.months[0].previousTotal,1);
+  const html=report.reportHtml(d,'전체','테스트');assert.ok(!html.includes('2026년 8월'));assert.ok(!html.includes('26.08'));assert.ok(!html.includes('26.Q2'));
+});
+test('custom date ranges clip months and quarters and compare the previous equal-length period',()=>{
+  const rows=[row('2026-07-14'),row('2026-07-15'),row('2026-07-31'),row('2026-09-10'),row('2026-09-11')];
+  const d=report.build(rows,'range',2026,0,'2026-09-23',{from:'2026-07-15',to:'2026-09-10'});
+  assert.equal(d.current.total,3);assert.equal(d.context.elapsed,58);assert.equal(d.context.previous.from,'2026-05-18');assert.equal(d.context.previousEnd,'2026-07-14');
+  assert.equal(d.months.length,2);assert.equal(d.months[0].start,'2026-07-15');assert.equal(d.months[1].cutoff,'2026-09-10');assert.ok(d.months.every(p=>p.partial));assert.equal(d.quarters[0].total,3);
+});
+test('custom ranges reject reversed dates and clamp leap-year anniversaries',()=>{
+  assert.throws(()=>report.rangeContext('2026-09-20','2026-09-01','2026-09-23'));
+  assert.equal(report.rangeContext('2024-02-29','2024-03-02','2024-03-04').lastYear.from,'2023-02-28');
 });
 test('empty reports are printable without NaN and contain exactly three report pages',()=>{
   const d=report.build([],'month',2026,8,'2026-09-23'),html=report.reportHtml(d,'전체','테스트');
