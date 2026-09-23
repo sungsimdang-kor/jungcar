@@ -49,12 +49,14 @@
       const pixelRatio=Math.min(2,16000/width,16000/height,Math.sqrt(24000000/(width*height)));
       const origin=copy.getBoundingClientRect();
       const bounds=node=>{
-        const boxes=[node,...node.querySelectorAll('*')].map(child=>child.getBoundingClientRect());
+        // SVG <title> and hidden nodes have a zero rect at the viewport origin;
+        // they must not extend a later PDF page back to the start of the report.
+        const boxes=[node,...node.querySelectorAll('*')].map(child=>child.getBoundingClientRect()).filter(box=>box.width||box.height);
         return {top:Math.min(...boxes.map(box=>box.top))-origin.top,bottom:Math.max(...boxes.map(box=>box.bottom))-origin.top};
       };
       // A long date chart may span pages: break between complete bar rows, never through a bar/date label.
       const pageCssHeight=184/277*width;
-      const blocks=[...copy.querySelectorAll('.analysis-report-header,.analysis-kpis,.analysis-grid>.card')].flatMap(node=>{
+      const blocks=[...copy.querySelectorAll('.analysis-report-header,.analysis-kpis,.analysis-grid>.card,.comparison-condition-summary,.comparison-metrics,.comparison-note,.comparison-charts>.card')].flatMap(node=>{
         const box=bounds(node);
         return box.bottom-box.top>pageCssHeight&&node.querySelector('.vbars')
           ? [...node.querySelectorAll(':scope>header,.vbars>div')].map(bounds):[box];
@@ -63,6 +65,7 @@
         const next=blocks.filter(other=>other.top>=block.bottom).map(other=>other.top);
         return Math.floor(block.bottom+(next.length?Math.min(...next)-block.bottom:0)/2);
       }))].filter(y=>!blocks.some(b=>b.top<y&&b.bottom>y)).sort((a,b)=>a-b);
+      const reportPages=[...copy.querySelectorAll('[data-report-page]')].map(bounds);
       const canvas=await renderer.toCanvas(copy,{
         width,height,canvasWidth:width,canvasHeight:height,pixelRatio,skipAutoScale:true,
         backgroundColor:'#f5f7fb',fontEmbedCSS:'',
@@ -78,12 +81,13 @@
         const pageWidth=pdf.internal.pageSize.getWidth(),pageHeight=pdf.internal.pageSize.getHeight();
         const margin=10,drawWidth=pageWidth-margin*2,drawHeight=pageHeight-margin*2-6;
         const scale=canvas.width/width;
-        const ranges=pageRanges(canvas.height,Math.floor(drawHeight/drawWidth*canvas.width),boundaries.map(y=>Math.round(y*scale)));
+        const ranges=reportPages.length?reportPages.map(p=>[Math.max(0,Math.floor(p.top*scale)-4),Math.min(canvas.height,Math.ceil(p.bottom*scale)+4)]):pageRanges(canvas.height,Math.floor(drawHeight/drawWidth*canvas.width),boundaries.map(y=>Math.round(y*scale)));
         ranges.forEach(([start,end],index)=>{
           if(index)pdf.addPage();
           const slice=document.createElement('canvas');slice.width=canvas.width;slice.height=end-start;
           slice.getContext('2d').drawImage(canvas,0,start,canvas.width,end-start,0,0,canvas.width,end-start);
-          pdf.addImage(slice.toDataURL('image/png'),'PNG',margin,margin,drawWidth,slice.height/canvas.width*drawWidth,undefined,'FAST');
+          const fittedWidth=Math.min(drawWidth,drawHeight*slice.width/slice.height);
+          pdf.addImage(slice.toDataURL('image/png'),'PNG',(pageWidth-fittedWidth)/2,margin,fittedWidth,slice.height/slice.width*fittedWidth,undefined,'FAST');
           pdf.setFontSize(9);pdf.setTextColor(100);pdf.text(`${index+1} / ${ranges.length}`,pageWidth-margin,pageHeight-6,{align:'right'});
           slice.width=0;slice.height=0;
         });

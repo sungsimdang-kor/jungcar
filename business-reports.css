@@ -1,0 +1,101 @@
+.report-actions { display:flex;gap:8px;flex-wrap:wrap; }
+.report-actions button,.br-controls button { border:1px solid #cbd5e1;background:white;color:#334155;border-radius:8px;padding:10px 15px;font-size:14px;font-weight:700;cursor:pointer; }
+.report-actions button:hover,.br-controls button:hover { background:#edf3ff; }
+.report-actions button:disabled { opacity:.5;cursor:wait; }
+.br-controls button.br-primary { background:#204a80;color:white;border-color:#204a80; }
+.br-controls { max-width:1420px;margin:0 auto 22px;padding:24px; }
+.br-control-title { display:flex;align-items:center;justify-content:space-between;gap:16px; }
+.br-control-title h2 { font-size:20px;margin:0 0 6px;color:#173765; }
+.br-control-title p { font-size:14px;color:#64748b;margin:0; }
+.br-period-controls { display:flex;align-items:end;gap:14px;flex-wrap:wrap;margin-top:22px; }
+.br-period-controls label { display:grid;gap:7px;font-size:13px;font-weight:700;min-width:130px; }
+.br-period-controls select { height:42px;width:100%; }
+.br-extra-filters { border-top:1px solid #e2e8f0;margin-top:20px;padding-top:16px; }
+.br-extra-filters summary { color:#475569;font-size:14px;cursor:pointer; }
+.br-extra-filters .filter-grid { margin:18px 0; }
+.business-report { max-width:1420px;margin:0 auto;color:#192c48; }
+.br-page { background:white;border:1px solid #dce4ef;border-radius:14px;padding:28px;margin:0 0 24px;box-sizing:border-box; }
+.br-cover { display:flex;align-items:center;justify-content:space-between;gap:24px;border-bottom:3px solid #224b7e;padding:0 0 20px; }
+.br-eyebrow,.br-page-heading>span { color:#557598;font-size:10px;font-weight:800;letter-spacing:.16em; }
+.br-cover h2,.br-page-heading h2 { font-size:28px;letter-spacing:-.035em;color:#173765;margin:7px 0; }
+.br-cover p { font-size:20px;font-weight:800;margin:4px 0 0; }
+.br-status { font-size:11px;background:#f0f5fb;padding:5px 9px;border-radius:4px;color:#516882;margin-left:8px;vertical-align:middle;white-space:nowrap; }
+.br-cover-meta { display:grid;gap:8px;text-align:right;font-size:12px;color:#64748b;flex-shrink:0; }
+.br-cover-meta strong { color:#304c70; }
+.br-filter-note { padding:12px 0;font-size:12px;color:#64748b;overflow-wrap:anywhere; }
+.br-kpis { display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:12px;margin-bottom:18px; }
+.br-kpi { border:1px solid #e2e8f0;border-radius:8px;padding:16px 12px;background:#f9fbfe;min-width:0; }
+.br-kpi h3 { margin:0 0 12px;font-size:12px;color:#51647d; }
+.br-kpi>strong { display:block;font-size:29px;line-height:1.2;letter-spacing:-.035em;overflow-wrap:anywhere; }
+.br-kpi>strong>span { font-size:13px;margin-left:3px;font-weight:600;letter-spacing:0; }
+.br-kpi-delta { margin-top:10px;font-size:13px;font-weight:700; }
+.br-kpi-delta small { margin-left:5px;font-size:11px;color:#64748b;font-weight:500; }
+.br-kpi p { font-size:11px;color:#64748b;margin:5px 0 0; }
+.br-up { color:#12666a; }.br-down { color:#b45346; }.br-neutral { color:#64748b; }
+.br-executive { background:#f1f6fc;border-left:3px solid #3e6d9c;border-radius:4px;padding:15px 18px;margin-bottom:20px; }
+.br-executive h3 { font-size:12px;margin:0 0 7px;color:#42648a; }
+.br-executive>p { margin:0 0 9px;font-size:16px;font-weight:700; }
+.br-executive>div { display:flex;gap:12px 24px;flex-wrap:wrap;font-size:12px;color:#526a83; }
+.br-executive small { margin-left:4px; }
+.br-section-heading { margin:18px 0 14px; }
+.br-section-heading>div { display:flex;align-items:center;gap:10px; }
+.br-section-heading>div>span { color:#7d97b4;font-size:12px;font-weight:800; }
+.br-section-heading h3 { color:#173765;font-size:17px;margin:0; }
+.br-section-heading p { margin:6px 0 0;font-size:11px;color:#64748b; }
+.br-chart { width:100%;height:auto;display:block;max-height:245px;font-family:Arial,sans-serif; }
+.br-chart-note { font-size:11px;color:#64748b;line-height:1.6;margin:10px 0; }
+.br-footer { margin-top:22px;padding-top:12px;border-top:1px solid #e2e8f0;display:flex;justify-content:space-between;gap:12px;font-size:10px;color:#7b8a9e; }
+.br-page-heading { border-bottom:2px solid #224b7e;padding-bottom:14px;margin-bottom:16px; }
+.br-page-heading h2 { font-size:23px; }
+.br-page-heading p { margin:0;font-size:12px;color:#64748b; }
+.br-table-scroll { overflow-x:auto; }
+.br-table { width:100%;border-collapse:collapse;font-size:12px;min-width:850px; }
+.br-table th,.br-table td { padding:8px 9px;border-bottom:1px solid #e7edf5;text-align:right;white-space:nowrap; }
+.br-table th:first-child { text-align:left; }
+.br-table thead { background:#edf3fa;color:#4b6483; }
+.br-table thead th { font-size:11px; }
+.br-table tbody th { font-weight:600;color:#3b5473; }
+.br-table td small { display:inline-block;font-size:10px;margin-left:7px;color:#64748b; }
+.br-table .br-selected-row { background:#f0f6fd; }
+.br-inline-tag { font-size:10px;margin-left:5px;color:#996009; }
+.br-demand-grid { display:grid;grid-template-columns:1.15fr 1fr;gap:32px; }
+.br-demand-grid>section { min-width:0; }
+.br-rank-list { display:grid;gap:0; }
+.br-rank-row { display:grid;grid-template-columns:22px minmax(0,1fr) 55px 120px;gap:10px;align-items:center;padding:12px 0;border-bottom:1px solid #eaf0f6; }
+.br-rank { color:#93a5ba;font-size:12px; }
+.br-rank-row strong { font-size:13px;overflow-wrap:anywhere; }.br-rank-row>b { font-size:13px;text-align:right; }
+.br-track { background:#edf2f8;border-radius:3px;height:5px;margin-top:7px;overflow:hidden; }
+.br-track>i { display:block;height:100%;background:#5d85b0; }
+.br-rank-diff { text-align:right;font-size:12px; }
+.br-rank-diff small { display:block;color:#7b8a9e;font-size:10px;margin-top:3px; }
+.br-quality { border:1px solid #e3eaf3;border-radius:7px;background:#fafcfe;padding:16px;margin-top:24px; }
+.br-quality h3 { margin:0;font-size:13px; }
+.br-quality ul { padding-left:16px;margin:10px 0 0;font-size:11px;color:#64748b;line-height:1.7; }
+.br-quality li { margin-bottom:5px; }
+.br-empty { padding:30px;text-align:center;color:#64748b;font-size:14px; }
+.comparison-report .analysis-report-header { margin-bottom:22px; }
+.comparison-report-page { margin-bottom:24px; }
+@media(max-width:1150px){.br-kpis{grid-template-columns:repeat(3,minmax(0,1fr));}.br-rank-row{grid-template-columns:18px minmax(0,1fr) 45px 90px;gap:7px;}.br-cover{align-items:start;}.br-cover-meta{font-size:11px;}.br-cover h2{font-size:24px;}}
+@media(max-width:760px){
+  .br-control-title,.br-cover { flex-direction:column;align-items:start; }.br-cover-meta{text-align:left;}
+  .br-controls,.br-page{padding:18px;}.br-demand-grid{grid-template-columns:1fr;gap:16px;}
+  .br-kpis{grid-template-columns:repeat(2,minmax(0,1fr));}.br-kpi>strong{font-size:27px;}
+  .br-footer{flex-wrap:wrap;}.br-executive>p{font-size:14px;}.br-period-controls{gap:10px;}.br-period-controls label{min-width:100px;flex:1;}
+  .br-chart{min-width:680px;}.br-trend{overflow-x:auto;}.br-status{display:inline-block;margin:6px 0 0;}
+}
+/* A report has an explicit page layout for both PNG and PDF, independent of the screen. */
+.report-export.business-report .br-page { margin:0 0 24px!important;padding:28px!important; }
+.report-export .br-kpis { grid-template-columns:repeat(6,minmax(0,1fr))!important; }
+.report-export .br-cover { flex-direction:row!important;align-items:center!important; }
+.report-export .br-cover h2 { font-size:28px!important; }
+.report-export .br-cover-meta { text-align:right!important;font-size:12px!important; }
+.report-export .br-demand-grid { grid-template-columns:1.15fr 1fr!important;gap:32px!important; }
+.report-export .br-rank-row { grid-template-columns:22px minmax(0,1fr) 55px 120px!important;gap:10px!important; }
+.report-export .br-chart { min-width:0!important;width:100%!important;max-height:245px!important; }
+.report-export .br-trend,.report-export .br-table-scroll { overflow:visible!important; }
+.report-export .br-status { display:inline!important;margin-left:8px!important; }
+.report-export .br-kpi>strong { font-size:29px!important; }
+.report-export .br-executive>p { font-size:16px!important; }
+.report-export .comparison-metrics { grid-template-columns:repeat(3,minmax(0,1fr))!important; }
+.report-export .comparison-condition-summary { grid-template-columns:repeat(2,minmax(0,1fr))!important; }
+.report-export .comparison-values strong { font-size:28px!important; }

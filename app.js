@@ -281,12 +281,13 @@ function render() {
   $(".top").classList.remove("login-top");
   $$("[data-tab]").forEach(btn => btn.classList.toggle("active", btn.dataset.tab === activeTab));
   if ($(".total-count")) $(".total-count").textContent = `${fmt(leads.length)}건`;
-  $(".page-title").textContent = activeTab === "overview" ? "고객 문의 현황" : activeTab === "customers" ? "전체 고객" : activeTab === "analysis" ? "고객 문의 분석" : activeTab === "comparison" ? "조건별 비교" : "설정";
+  $(".page-title").textContent = activeTab === "overview" ? "고객 문의 현황" : activeTab === "customers" ? "전체 고객" : activeTab === "analysis" ? "고객 문의 분석" : activeTab === "comparison" ? "조건별 비교" : activeTab === "reports" ? "월간·분기 리포트" : "설정";
   selectedCustomer = selectedCustomer && buildCustomers().find(c => c.id === selectedCustomer.id) || null;
   if (activeTab === "overview") renderOverview();
   if (activeTab === "customers") renderCustomers();
   if (activeTab === "analysis") renderAnalysis();
   if (activeTab === "comparison") renderComparison();
+  if (activeTab === "reports") window.JungcarBusinessReports.mount();
   if (activeTab === "settings") renderSettings();
 }
 
@@ -606,7 +607,7 @@ function renderAnalysisResults() {
 }
 
 function renderComparison(){
-  app.innerHTML=`<section class="comparison-intro"><div><h2>두 조건을 나란히 비교하세요</h2><p>기간·차종·문의 종류 등을 조합하면 결과가 바로 바뀝니다. 차이는 B − A 기준입니다.</p></div><button id="swapComparison" class="secondary">A ↔ B 바꾸기</button></section>
+  app.innerHTML=`<section class="comparison-intro"><div><h2>두 조건을 나란히 비교하세요</h2><p>기간·차종·문의 종류 등을 조합하면 결과가 바로 바뀝니다. 차이는 B − A 기준입니다.</p></div><div class="report-actions"><button id="swapComparison" class="secondary">A ↔ B 바꾸기</button><button id="comparisonPng">PNG 저장</button><button id="comparisonPdf">PDF 저장</button></div></section>
     <section class="comparison-filters">${comparisonFilters.map((filters,index)=>`
       <section class="panel comparison-filter comparison-${index}"><header><h3><span class="cohort-badge">${index?'B':'A'}</span> 비교 조건 ${index?'B':'A'}</h3><button type="button" class="secondary" data-reset-comparison="${index}">초기화</button></header>
         <form id="comparisonForm${index}" class="filter-grid">${analysisFilterFields(filters)}</form>
@@ -619,6 +620,10 @@ function renderComparison(){
   });
   $$('[data-reset-comparison]').forEach(button=>button.onclick=()=>{comparisonFilters[Number(button.dataset.resetComparison)]={};renderComparison();});
   $('#swapComparison').onclick=()=>{comparisonFilters.reverse();renderComparison();};
+  for(const format of ['png','pdf']){
+    const button=$(format==='png'?'#comparisonPng':'#comparisonPdf');
+    button.onclick=()=>window.JungcarReportExport.save({report:$('#comparisonReport'),button,format,filename:`jungcar-comparison-${today()}`});
+  }
   renderComparisonResults();
 }
 function comparisonMetrics(rows,filters){
@@ -652,8 +657,10 @@ function comparisonBars(a,b,totalA,totalB,labels){
 function renderComparisonResults(){
   if(!$('#comparisonResults'))return;
   if(comparisonFilters.some(f=>f.dateFrom&&f.dateTo&&f.dateFrom>f.dateTo)){
+    $('#comparisonPng').disabled=true;$('#comparisonPdf').disabled=true;
     $('#comparisonResults').innerHTML='<p class="panel comparison-note" role="alert">시작일이 종료일보다 늦습니다. 비교 기간을 확인해 주세요.</p>';return;
   }
+  $('#comparisonPng').disabled=false;$('#comparisonPdf').disabled=false;
   const [a,b]=comparisonFilters.map(f=>filteredAnalysisRows(f));
   const [am,bm]=[comparisonMetrics(a,comparisonFilters[0]),comparisonMetrics(b,comparisonFilters[1])];
   const ids=new Set(a.map(r=>r.id)),overlap=b.filter(r=>ids.has(r.id)).length;
@@ -662,7 +669,7 @@ function renderComparisonResults(){
   const budgets=[count(a.map(budgetBand)),count(b.map(budgetBand))];
   const weekdays=[a,b].map(rows=>count(rows.filter(r=>parseDate(r.inquiryDate)).map(r=>weekdayLabels[new Date(r.inquiryDate+'T00:00:00Z').getUTCDay()])));
   const labels=(maps,limit)=>uniq(maps.flatMap(map=>Object.keys(map))).sort((x,y)=>((maps[0][y]||0)+(maps[1][y]||0))-((maps[0][x]||0)+(maps[1][x]||0))||x.localeCompare(y,'ko')).slice(0,limit);
-  $('#comparisonResults').innerHTML=`<section class="comparison-condition-summary">${comparisonFilters.map((f,i)=>`<p><span class="cohort-badge ${i?'cohort-b':'cohort-a'}">${i?'B':'A'}</span>${escapeHtml(analysisFilterSummary(f))}</p>`).join('')}</section>
+  $('#comparisonResults').innerHTML=`<section id="comparisonReport" class="comparison-report analysis-report"><section class="comparison-report-page" data-report-page><header class="analysis-report-header"><div><span>JUNGCAR · COMPARISON REPORT</span><h2>중카TV 조건별 비교 보고서</h2><p>${escapeHtml(reportGeneratedAt())} 생성</p></div><div class="analysis-report-filters"><strong>비교 기준</strong><p>A와 B의 상담 기록을 각각 집계 · 차이는 B − A</p></div></header><section class="comparison-condition-summary">${comparisonFilters.map((f,i)=>`<p><span class="cohort-badge ${i?'cohort-b':'cohort-a'}">${i?'B':'A'}</span>${escapeHtml(analysisFilterSummary(f))}</p>`).join('')}</section>
     <section class="comparison-metrics">
       ${comparisonMetric('상담 수',am.total,bm.total,'건')}
       ${comparisonMetric('고객 수',am.customers,bm.customers,'명')}
@@ -672,12 +679,13 @@ function renderComparisonResults(){
       ${comparisonMetric('방문·예약 비율',am.visit,bm.visit,'%',1,true)}
     </section>
     <div class="comparison-note"><p>양쪽에 공통으로 포함된 상담 ${fmt(overlap)}건 · 고객 수는 각 조건 안에서 전화번호로 중복을 제외합니다.</p><p>일평균은 시작일~종료일의 모든 날짜(상담 없는 날 포함) 기준입니다. 날짜를 지정하지 않은 경계는 해당 결과의 첫·마지막 상담일을 사용합니다.</p><p>A ${escapeHtml(am.from||'—')} ~ ${escapeHtml(am.to||'—')} (${fmt(am.days)}일) · B ${escapeHtml(bm.from||'—')} ~ ${escapeHtml(bm.to||'—')} (${fmt(bm.days)}일) · 평균 예산은 입력된 상담만 포함: A ${fmt(am.budgetCount)}건 / B ${fmt(bm.budgetCount)}건</p></div>
-    <section class="grid comparison-charts">
+    </section><section class="grid comparison-charts comparison-report-page" data-report-page>
       ${card('문의 종류 비교','막대는 각 조건의 전체 상담 대비 비율 · A 파랑 / B 보라',comparisonBars(...types,a.length,b.length,labels(types,100)))}
       ${card('희망 차종 TOP 10 비교','A+B 합산 상위 10개 · 복수 차종은 각각 집계하여 합계가 100%를 넘을 수 있습니다.',comparisonBars(...models,a.length,b.length,labels(models,10)))}
+    </section><section class="grid comparison-charts comparison-report-page" data-report-page>
       ${card('예산 분포 비교','각 조건의 전체 상담 대비 비율 · 미입력 포함',comparisonBars(...budgets,a.length,b.length,uniq([...orderedBudgetEntries({}).map(([label])=>label),...labels(budgets,100)])))}
       ${card('상담 요일 비교','각 조건의 전체 상담 대비 비율 · 날짜 없는 상담은 요일 집계 제외',comparisonBars(...weekdays,a.length,b.length,weekdayLabels.slice(1).concat(weekdayLabels[0])))}
-    </section>`;
+    </section></section>`;
 }
 
 function renderSettings() { return renderFirebaseSettings(); }
@@ -1169,6 +1177,7 @@ function refreshFirebaseView(){
   }
   if(activeTab==='analysis'){renderAnalysisResults();firebaseRefreshPending=false;return;}
   if(activeTab==='comparison'){renderComparisonResults();firebaseRefreshPending=false;return;}
+  if(activeTab==='reports'){window.JungcarBusinessReports.refresh();firebaseRefreshPending=false;return;}
   if(isTextEntryTarget(document.activeElement))return;
   firebaseRefreshPending=false;render();
 }
