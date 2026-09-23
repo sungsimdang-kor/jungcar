@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>중카TV 고객 DB · Jungcar</title>
   <meta name="description" content="중카TV 고객 상담 관리 대시보드">
-  <link rel="stylesheet" href="styles.css?v=20260905-customer-filters">
+  <link rel="stylesheet" href="styles.css?v=20260923-reports">
 </head>
 <body>
   <main class="layout">
@@ -15,6 +15,7 @@
         <button data-tab="overview" class="active">현황</button>
         <button data-tab="customers">고객</button>
         <button data-tab="analysis">분석</button>
+        <button data-tab="comparison">비교</button>
       </nav>
       <div class="side-foot"><button data-tab="settings" class="settings-button"><span class="settings-icon" aria-hidden="true">⚙</span><span>설정</span></button></div>
     </aside>
@@ -24,6 +25,7 @@
     </section>
   </main>
   <script src="firebase-config.js?v=20260904-1"></script>
-  <script src="app.js?v=20260905-customer-filters"></script>
+  <script src="report-export.js?v=20260923-reports"></script>
+  <script src="app.js?v=20260923-reports"></script>
 </body>
 </html>

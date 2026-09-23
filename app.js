@@ -10,11 +10,11 @@ let activeTab = "overview";
 let selectedCustomer = null;
 let session = JSON.parse(localStorage.getItem(SESSION_KEY) || "null");
 let analysisFilters = {};
+let comparisonFilters = [{},{}];
 let customerFilters = {};
 let customerSort = {key:"lastInquiryDate",direction:"desc"};
 let loginInProgress = false;
 let dataLoading = false;
-let htmlToImagePromise = null;
 let pendingDbPromise = null;
 let pendingFlushPromise = null;
 let pendingRetryTimer = null;
@@ -281,11 +281,12 @@ function render() {
   $(".top").classList.remove("login-top");
   $$("[data-tab]").forEach(btn => btn.classList.toggle("active", btn.dataset.tab === activeTab));
   if ($(".total-count")) $(".total-count").textContent = `${fmt(leads.length)}건`;
-  $(".page-title").textContent = activeTab === "overview" ? "고객 문의 현황" : activeTab === "customers" ? "전체 고객" : activeTab === "analysis" ? "고객 문의 분석" : "설정";
+  $(".page-title").textContent = activeTab === "overview" ? "고객 문의 현황" : activeTab === "customers" ? "전체 고객" : activeTab === "analysis" ? "고객 문의 분석" : activeTab === "comparison" ? "조건별 비교" : "설정";
   selectedCustomer = selectedCustomer && buildCustomers().find(c => c.id === selectedCustomer.id) || null;
   if (activeTab === "overview") renderOverview();
   if (activeTab === "customers") renderCustomers();
   if (activeTab === "analysis") renderAnalysis();
+  if (activeTab === "comparison") renderComparison();
   if (activeTab === "settings") renderSettings();
 }
 
@@ -478,20 +479,28 @@ function renderCustomerResults(){
   });
 }
 
+function analysisFilterFields(filters) {
+  const option = (label, key, values) => `<label>${label}<select name="${key}"><option value="">전체</option>${uniq(values).sort().map(v => `<option value="${escapeHtml(v)}" ${selected(filters[key] || "", v)}>${escapeHtml(v)}</option>`).join("")}</select></label>`;
+  return `<label class="filter-search">통합 검색<input name="search" value="${escapeHtml(filters.search || "")}" placeholder="전화번호·차종·조건·문의 내용 검색"></label>
+    <label>시작일<input name="dateFrom" type="date" value="${escapeHtml(filters.dateFrom || "")}"></label>
+    <label>종료일<input name="dateTo" type="date" value="${escapeHtml(filters.dateTo || "")}"></label>
+    ${option("문의 종류", "inquiryType", leads.map(r => r.inquiryType))}
+    ${formField("희망 차종", modelControl("model", filters.model || "", "차종 입력 · 비우면 전체"))}
+    ${option("할부 여부", "financeStatus", leads.map(r => r.financeStatus || "미확인"))}
+    ${option("방문 여부", "visitStatus", leads.map(r => r.visitStatus || "미확인"))}
+    <label>최대 예산(만원)<input name="budgetMax" type="number" min="0" step="100" value="${escapeHtml(filters.budgetMax || "")}" placeholder="예: 3000"></label>`;
+}
+function bindAnalysisModels(form){
+  const catalog=[...CAR_MODELS],known=new Set(catalog.map(item=>item.name));
+  uniq(leads.flatMap(row=>row.models||[])).forEach(name=>{if(!known.has(name))catalog.push({name,maker:"기존 상담 차종"});});
+  bindModelAutocomplete(form,{catalog,completeOnBlur:false});
+}
 function renderAnalysis() {
-  const option = (label, key, values) => `<label>${label}<select name="${key}"><option value="">전체</option>${uniq(values).sort().map(v => `<option value="${escapeHtml(v)}" ${selected(analysisFilters[key] || "", v)}>${escapeHtml(v)}</option>`).join("")}</select></label>`;
   app.innerHTML = `
     <section class="analysis-filter panel">
-      <div class="filter-heading"><div><h2>분석 조건</h2><p>검색어나 조건을 바꾸면 아래 모든 지표와 차트가 함께 변경됩니다.</p></div><div class="filter-actions"><button type="button" id="resetAnalysis">초기화</button><button type="button" id="exportAnalysisPng">PNG 이미지 저장</button><button type="button" id="printAnalysis">PDF 저장/인쇄</button></div></div>
+      <div class="filter-heading"><div><h2>분석 조건</h2><p>검색어나 조건을 바꾸면 아래 모든 지표와 차트가 함께 변경됩니다.</p></div><div class="filter-actions"><button type="button" id="resetAnalysis">초기화</button><button type="button" id="exportAnalysisPng">PNG 이미지 저장</button><button type="button" id="printAnalysis">PDF 파일 저장</button></div></div>
       <form id="analysisForm" class="filter-grid">
-        <label class="filter-search">통합 검색<input name="search" value="${escapeHtml(analysisFilters.search || "")}" placeholder="전화번호·차종·조건·문의 내용 검색"></label>
-        <label>시작일<input name="dateFrom" type="date" value="${escapeHtml(analysisFilters.dateFrom || "")}"></label>
-        <label>종료일<input name="dateTo" type="date" value="${escapeHtml(analysisFilters.dateTo || "")}"></label>
-        ${option("문의 종류", "inquiryType", leads.map(r => r.inquiryType))}
-        ${formField("희망 차종", modelControl("model", analysisFilters.model || "", "차종 입력 · 비우면 전체"))}
-        ${option("할부 여부", "financeStatus", leads.map(r => r.financeStatus || "미확인"))}
-        ${option("방문 여부", "visitStatus", leads.map(r => r.visitStatus || "미확인"))}
-        <label>최대 예산(만원)<input name="budgetMax" type="number" min="0" step="100" value="${escapeHtml(analysisFilters.budgetMax || "")}" placeholder="예: 3000"></label>
+        ${analysisFilterFields(analysisFilters)}
       </form>
     </section>
     <div id="analysisResults"></div>`;
@@ -502,20 +511,14 @@ function renderAnalysis() {
   $("#analysisForm").addEventListener("input", updateAnalysisFilters);
   $("#analysisForm").addEventListener("change", updateAnalysisFilters);
   $("#analysisForm").addEventListener("submit", event => event.preventDefault());
-  const analysisModels=[...CAR_MODELS];
-  const knownModels=new Set(analysisModels.map(item=>item.name));
-  uniq(leads.flatMap(row=>row.models||[])).forEach(name=>{
-    if(!knownModels.has(name))analysisModels.push({name,maker:"기존 상담 차종"});
-  });
-  bindModelAutocomplete($("#analysisForm"), {catalog:analysisModels,completeOnBlur:false});
+  bindAnalysisModels($("#analysisForm"));
   $("#resetAnalysis").onclick = () => { analysisFilters = {}; renderAnalysis(); };
   $("#exportAnalysisPng").onclick = exportAnalysisPng;
   $("#printAnalysis").onclick = printAnalysisReport;
   renderAnalysisResults();
 }
 
-function analysisFilterSummary() {
-  const f = analysisFilters;
+function analysisFilterSummary(f = analysisFilters) {
   const items = [];
   if (f.search) items.push(`검색: ${f.search}`);
   if (f.dateFrom || f.dateTo) items.push(`기간: ${f.dateFrom || "전체"} ~ ${f.dateTo || "전체"}`);
@@ -536,71 +539,14 @@ function reportGeneratedAt() {
 }
 
 function printAnalysisReport() {
-  if (!$("#analysisReport")) return;
-  const previousTitle = document.title;
-  let cleaned = false;
-  const cleanup = () => {
-    if (cleaned) return;
-    cleaned = true;
-    document.body.classList.remove("analysis-printing");
-    document.title = previousTitle;
-  };
-  document.body.classList.add("analysis-printing");
-  document.title = `중카TV_고객분석_${today()}`;
-  window.addEventListener("afterprint", cleanup, { once:true });
-  setTimeout(cleanup, 120000);
-  requestAnimationFrame(() => window.print());
+  return window.JungcarReportExport.save({report:$("#analysisReport"),button:$("#printAnalysis"),format:"pdf",filename:`jungcar-analysis-${today()}`});
 }
 
-function loadHtmlToImage() {
-  if (window.htmlToImage) return Promise.resolve(window.htmlToImage);
-  if (htmlToImagePromise) return htmlToImagePromise;
-  htmlToImagePromise = new Promise((resolve, reject) => {
-    const script = document.createElement("script");
-    script.src = "https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/dist/html-to-image.js";
-    script.onload = () => window.htmlToImage ? resolve(window.htmlToImage) : reject(new Error("이미지 변환 도구를 불러오지 못했습니다."));
-    script.onerror = () => reject(new Error("이미지 변환 도구를 불러오지 못했습니다."));
-    document.head.appendChild(script);
-  }).catch(error => {
-    htmlToImagePromise = null;
-    throw error;
-  });
-  return htmlToImagePromise;
+function exportAnalysisPng() {
+  return window.JungcarReportExport.save({report:$("#analysisReport"),button:$("#exportAnalysisPng"),format:"png",filename:`jungcar-analysis-${today()}`});
 }
 
-async function exportAnalysisPng() {
-  const report = $("#analysisReport");
-  const button = $("#exportAnalysisPng");
-  if (!report || !button || button.disabled) return;
-  const originalText = button.textContent;
-  button.disabled = true;
-  button.textContent = "이미지 만드는 중...";
-  report.classList.add("exporting");
-  try {
-    if (document.fonts?.ready) await document.fonts.ready;
-    const htmlToImage = await loadHtmlToImage();
-    const dataUrl = await htmlToImage.toPng(report, {
-      backgroundColor: "#f5f7fb",
-      cacheBust: true,
-      pixelRatio: 2,
-      width: report.scrollWidth,
-      height: report.scrollHeight,
-    });
-    const link = document.createElement("a");
-    link.download = `jungcar-analysis-${today()}.png`;
-    link.href = dataUrl;
-    link.click();
-  } catch (error) {
-    alert(error?.message || "PNG 이미지를 만들지 못했습니다. PDF 저장/인쇄를 이용해 주세요.");
-  } finally {
-    report.classList.remove("exporting");
-    button.disabled = false;
-    button.textContent = originalText;
-  }
-}
-
-function filteredAnalysisRows() {
-  const f = analysisFilters;
+function filteredAnalysisRows(f = analysisFilters) {
   const term = String(f.search || "").trim().toLowerCase();
   const modelTerm = String(f.model || "").trim().toLocaleLowerCase("ko-KR");
   return leads.filter(r => {
@@ -610,6 +556,7 @@ function filteredAnalysisRows() {
       r.conditionRaw,
     ].join(" ").toLowerCase();
     if (term && !searchable.includes(term)) return false;
+    if ((f.dateFrom || f.dateTo) && !parseDate(r.inquiryDate)) return false;
     if (f.dateFrom && (r.inquiryDate || "") < f.dateFrom) return false;
     if (f.dateTo && (r.inquiryDate || "") > f.dateTo) return false;
     if (f.inquiryType && r.inquiryType !== f.inquiryType) return false;
@@ -655,6 +602,81 @@ function renderAnalysisResults() {
         ${card("할부 여부", "할부 문의 현황", bars(topEntries(byFinance,8)))}
         ${card("방문 여부", "방문·예약 현황", bars(topEntries(byVisit,8)))}
       </section>
+    </section>`;
+}
+
+function renderComparison(){
+  app.innerHTML=`<section class="comparison-intro"><div><h2>두 조건을 나란히 비교하세요</h2><p>기간·차종·문의 종류 등을 조합하면 결과가 바로 바뀝니다. 차이는 B − A 기준입니다.</p></div><button id="swapComparison" class="secondary">A ↔ B 바꾸기</button></section>
+    <section class="comparison-filters">${comparisonFilters.map((filters,index)=>`
+      <section class="panel comparison-filter comparison-${index}"><header><h3><span class="cohort-badge">${index?'B':'A'}</span> 비교 조건 ${index?'B':'A'}</h3><button type="button" class="secondary" data-reset-comparison="${index}">초기화</button></header>
+        <form id="comparisonForm${index}" class="filter-grid">${analysisFilterFields(filters)}</form>
+      </section>`).join('')}</section><div id="comparisonResults" aria-live="polite"></div>`;
+  comparisonFilters.forEach((_,index)=>{
+    const form=$(`#comparisonForm${index}`);
+    const update=()=>{comparisonFilters[index]=Object.fromEntries(new FormData(form).entries());renderComparisonResults();};
+    form.addEventListener('input',update);form.addEventListener('change',update);form.addEventListener('submit',event=>event.preventDefault());
+    bindAnalysisModels(form);
+  });
+  $$('[data-reset-comparison]').forEach(button=>button.onclick=()=>{comparisonFilters[Number(button.dataset.resetComparison)]={};renderComparison();});
+  $('#swapComparison').onclick=()=>{comparisonFilters.reverse();renderComparison();};
+  renderComparisonResults();
+}
+function comparisonMetrics(rows,filters){
+  const budgets=rows.map(row=>Number(row.budgetMax)).filter(value=>Number.isFinite(value)&&value>0);
+  const dates=rows.map(row=>row.inquiryDate).filter(value=>parseDate(value)).sort();
+  const from=filters.dateFrom||dates[0],to=filters.dateTo||dates.at(-1);
+  const days=from&&to?Math.round((Date.parse(to+'T00:00:00Z')-Date.parse(from+'T00:00:00Z'))/86400000)+1:0;
+  return {total:rows.length,customers:buildCustomers(rows).length,
+    averageBudget:budgets.length?budgets.reduce((a,b)=>a+b,0)/budgets.length:null,budgetCount:budgets.length,
+    finance:rows.length?rows.filter(r=>r.financeStatus==='예').length/rows.length*100:null,
+    visit:rows.length?rows.filter(r=>r.visitStatus==='예').length/rows.length*100:null,
+    daily:days>0?rows.length/days:null,days:Math.max(days,0),from,to};
+}
+function comparisonMetric(label,a,b,unit,decimals=0,rate=false){
+  const display=value=>value==null?'—':`${value.toLocaleString('ko-KR',{maximumFractionDigits:decimals,minimumFractionDigits:decimals})}${unit}`;
+  const difference=a==null||b==null?null:b-a;
+  const signed=value=>`${value>0?'+':''}${value.toLocaleString('ko-KR',{maximumFractionDigits:decimals,minimumFractionDigits:decimals})}`;
+  const relative=rate||a==null||b==null?'':a===0?(b===0?'변화 없음':'A가 0으로 증감률 계산 불가'):`${signed((b-a)/a*100)}%`;
+  return `<article class="comparison-metric"><h3>${label}</h3><div class="comparison-values"><div><span class="cohort-a">A</span><strong>${display(a)}</strong></div><div><span class="cohort-b">B</span><strong>${display(b)}</strong></div></div><p class="comparison-delta ${difference>0?'increase':difference<0?'decrease':''}">B − A <b>${difference==null?'비교할 데이터 없음':signed(difference)+(rate?'%p':unit)}</b>${relative?`<small>${relative}</small>`:''}</p></article>`;
+}
+function comparisonBars(a,b,totalA,totalB,labels){
+  if(!totalA&&!totalB)return '<p class="empty">조건에 맞는 상담이 없습니다.</p>';
+  return `<div class="comparison-bars">${labels.map(label=>{
+    const av=a[label]||0,bv=b[label]||0,ap=totalA?av/totalA*100:0,bp=totalB?bv/totalB*100:0;
+    const delta=bp-ap;
+    return `<div class="comparison-bar-row"><header><strong>${escapeHtml(label)}</strong><small>${!totalA||!totalB?'비율 차이 —':`B − A ${delta>0?'+':''}${delta.toFixed(1)}%p`}</small></header>
+      <div class="comparison-bar"><span class="cohort-a">A</span><i><em style="width:${Math.min(ap,100)}%"></em></i><b>${fmt(av)}건 <small>(${totalA?ap.toFixed(1)+'%':'—'})</small></b></div>
+      <div class="comparison-bar comparison-bar-b"><span class="cohort-b">B</span><i><em style="width:${Math.min(bp,100)}%"></em></i><b>${fmt(bv)}건 <small>(${totalB?bp.toFixed(1)+'%':'—'})</small></b></div></div>`;
+  }).join('')}</div>`;
+}
+function renderComparisonResults(){
+  if(!$('#comparisonResults'))return;
+  if(comparisonFilters.some(f=>f.dateFrom&&f.dateTo&&f.dateFrom>f.dateTo)){
+    $('#comparisonResults').innerHTML='<p class="panel comparison-note" role="alert">시작일이 종료일보다 늦습니다. 비교 기간을 확인해 주세요.</p>';return;
+  }
+  const [a,b]=comparisonFilters.map(f=>filteredAnalysisRows(f));
+  const [am,bm]=[comparisonMetrics(a,comparisonFilters[0]),comparisonMetrics(b,comparisonFilters[1])];
+  const ids=new Set(a.map(r=>r.id)),overlap=b.filter(r=>ids.has(r.id)).length;
+  const types=[count(a.map(r=>r.inquiryType)),count(b.map(r=>r.inquiryType))];
+  const models=[count(a.flatMap(r=>uniq(r.models||[]))),count(b.flatMap(r=>uniq(r.models||[])))];
+  const budgets=[count(a.map(budgetBand)),count(b.map(budgetBand))];
+  const weekdays=[a,b].map(rows=>count(rows.filter(r=>parseDate(r.inquiryDate)).map(r=>weekdayLabels[new Date(r.inquiryDate+'T00:00:00Z').getUTCDay()])));
+  const labels=(maps,limit)=>uniq(maps.flatMap(map=>Object.keys(map))).sort((x,y)=>((maps[0][y]||0)+(maps[1][y]||0))-((maps[0][x]||0)+(maps[1][x]||0))||x.localeCompare(y,'ko')).slice(0,limit);
+  $('#comparisonResults').innerHTML=`<section class="comparison-condition-summary">${comparisonFilters.map((f,i)=>`<p><span class="cohort-badge ${i?'cohort-b':'cohort-a'}">${i?'B':'A'}</span>${escapeHtml(analysisFilterSummary(f))}</p>`).join('')}</section>
+    <section class="comparison-metrics">
+      ${comparisonMetric('상담 수',am.total,bm.total,'건')}
+      ${comparisonMetric('고객 수',am.customers,bm.customers,'명')}
+      ${comparisonMetric('일평균 상담',am.daily,bm.daily,'건',1)}
+      ${comparisonMetric('평균 최대 예산',am.averageBudget,bm.averageBudget,'만원',0)}
+      ${comparisonMetric('할부 조회 요청 비율',am.finance,bm.finance,'%',1,true)}
+      ${comparisonMetric('방문·예약 비율',am.visit,bm.visit,'%',1,true)}
+    </section>
+    <div class="comparison-note"><p>양쪽에 공통으로 포함된 상담 ${fmt(overlap)}건 · 고객 수는 각 조건 안에서 전화번호로 중복을 제외합니다.</p><p>일평균은 시작일~종료일의 모든 날짜(상담 없는 날 포함) 기준입니다. 날짜를 지정하지 않은 경계는 해당 결과의 첫·마지막 상담일을 사용합니다.</p><p>A ${escapeHtml(am.from||'—')} ~ ${escapeHtml(am.to||'—')} (${fmt(am.days)}일) · B ${escapeHtml(bm.from||'—')} ~ ${escapeHtml(bm.to||'—')} (${fmt(bm.days)}일) · 평균 예산은 입력된 상담만 포함: A ${fmt(am.budgetCount)}건 / B ${fmt(bm.budgetCount)}건</p></div>
+    <section class="grid comparison-charts">
+      ${card('문의 종류 비교','막대는 각 조건의 전체 상담 대비 비율 · A 파랑 / B 보라',comparisonBars(...types,a.length,b.length,labels(types,100)))}
+      ${card('희망 차종 TOP 10 비교','A+B 합산 상위 10개 · 복수 차종은 각각 집계하여 합계가 100%를 넘을 수 있습니다.',comparisonBars(...models,a.length,b.length,labels(models,10)))}
+      ${card('예산 분포 비교','각 조건의 전체 상담 대비 비율 · 미입력 포함',comparisonBars(...budgets,a.length,b.length,uniq([...orderedBudgetEntries({}).map(([label])=>label),...labels(budgets,100)])))}
+      ${card('상담 요일 비교','각 조건의 전체 상담 대비 비율 · 날짜 없는 상담은 요일 집계 제외',comparisonBars(...weekdays,a.length,b.length,weekdayLabels.slice(1).concat(weekdayLabels[0])))}
     </section>`;
 }
 
@@ -1146,6 +1168,7 @@ function refreshFirebaseView(){
     renderCustomerResults();firebaseRefreshPending=false;return;
   }
   if(activeTab==='analysis'){renderAnalysisResults();firebaseRefreshPending=false;return;}
+  if(activeTab==='comparison'){renderComparisonResults();firebaseRefreshPending=false;return;}
   if(isTextEntryTarget(document.activeElement))return;
   firebaseRefreshPending=false;render();
 }
