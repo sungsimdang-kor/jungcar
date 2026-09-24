@@ -112,6 +112,24 @@
 .br-single-period>b { color:#204a80;font-size:32px;white-space:nowrap; }.br-single-period>b>span { font-size:14px;margin-left:4px; }
 .br-compare-controls { border:1px solid #dce6f4;border-radius:9px;padding:16px;margin-top:18px;background:#f8fafd; }
 .br-compare-controls:empty { display:none; }
+.br-period-checks { display:flex;flex-wrap:wrap;gap:9px; }
+.br-period-checks label { display:flex;align-items:center;gap:8px;border:1px solid #cddceb;border-radius:7px;padding:9px 12px;background:white;font-size:13px;cursor:pointer; }
+.br-period-checks input { width:17px!important;height:17px!important;accent-color:#245a9c; }
+.br-period-checks label:has(input:checked) { background:#eaf2ff;border-color:#6793ce;color:#204a80; }
+.br-period-checks label:has(input:disabled) { opacity:.55;cursor:not-allowed; }
+.br-period-checks small { font-size:10px;color:#996009; }
+.br-selected-periods { display:flex;flex-wrap:wrap;gap:6px;margin-bottom:15px; }
+.br-selected-periods span { background:#edf3fb;border-radius:5px;padding:6px 9px;font-size:11px;color:#315a86; }
+.br-insight-grid { display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px; }
+.br-insight-card { background:#f8fafd;border:1px solid #d9e5f3;border-radius:9px;padding:17px; }
+.br-insight-card h3 { color:#254d7d;font-size:15px;margin:0 0 13px; }
+.br-insight-card dl { margin:0;display:grid;gap:10px; }
+.br-insight-card dt { font-size:11px;color:#637b95; }.br-insight-card dd { margin:5px 0 0;font-size:14px;font-weight:700; }
+.br-insight-card p { padding-top:12px;border-top:1px solid #dce5ef;font-size:12px;line-height:1.7;color:#355a81; }
+.br-insight-card>small { font-size:10px;color:#75889e; }
+.br-table td:has(small) { white-space:normal;min-width:110px; }
+.br-table td>small { display:block;margin:4px 0 0; }
+.report-export .br-insight-grid { grid-template-columns:repeat(auto-fit,minmax(260px,1fr))!important; }
 .br-compare-controls strong { font-size:14px;color:#244970; }
 .br-compare-controls p { font-size:12px;color:#64748b;margin:6px 0 12px; }
 .br-compare-pickers,.br-pair-grid { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px; }
