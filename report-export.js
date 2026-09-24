@@ -44,6 +44,24 @@
         document.fonts?.ready
       ]);
       await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+      const explicitPages=[...copy.querySelectorAll('[data-report-page]')];
+      // Render each report page independently so long daily reports keep readable resolution.
+      if(format==='pdf'&&explicitPages.length){
+        const pdf=new pdfLibrary.jsPDF({orientation:'landscape',unit:'mm',format:'a4',compress:true});
+        const pageWidth=pdf.internal.pageSize.getWidth(),pageHeight=pdf.internal.pageSize.getHeight(),margin=10;
+        for(let index=0;index<explicitPages.length;index++){
+          button.textContent=`PDF 만드는 중… ${index+1}/${explicitPages.length}`;
+          const node=explicitPages[index],width=Math.ceil(Math.max(node.getBoundingClientRect().width,node.scrollWidth)),height=Math.ceil(Math.max(node.getBoundingClientRect().height,node.scrollHeight));
+          const canvas=await renderer.toCanvas(node,{width,height,canvasWidth:width,canvasHeight:height,pixelRatio:Math.min(2,16000/width,16000/height,Math.sqrt(24000000/(width*height))),skipAutoScale:true,backgroundColor:node.classList.contains('br-page')?'#fff':'#f5f7fb',fontEmbedCSS:'',style:{margin:'0',transform:'none',width:`${width}px`,height:`${height}px`,maxWidth:'none',boxSizing:'border-box'}});
+          if(!canvas.width||!canvas.height)throw new Error('보고서 페이지를 만들지 못했습니다. 다시 시도해 주세요.');
+          if(index)pdf.addPage();
+          const fittedWidth=Math.min(pageWidth-margin*2,(pageHeight-margin*2-6)*canvas.width/canvas.height);
+          pdf.addImage(canvas.toDataURL('image/png'),'PNG',(pageWidth-fittedWidth)/2,margin,fittedWidth,canvas.height/canvas.width*fittedWidth,undefined,'FAST');
+          pdf.setFontSize(9);pdf.setTextColor(100);pdf.text(`${index+1} / ${explicitPages.length}`,pageWidth-margin,pageHeight-6,{align:'right'});
+          canvas.width=0;canvas.height=0;
+        }
+        download(pdf.output('blob'),filename+'.pdf');return;
+      }
       const width=Math.ceil(Math.max(copy.getBoundingClientRect().width,copy.scrollWidth));
       const height=Math.ceil(Math.max(copy.getBoundingClientRect().height,copy.scrollHeight));
       const pixelRatio=Math.min(2,16000/width,16000/height,Math.sqrt(24000000/(width*height)));

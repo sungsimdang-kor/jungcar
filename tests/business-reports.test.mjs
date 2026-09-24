@@ -59,3 +59,38 @@ test('zero denominators and rate changes are explicit',()=>{
   assert.ok(report.delta(10,0,{unit:'건'}).includes('산출 제외'));assert.ok(report.delta(60,50,{rate:true}).includes('+10.0%p'));
   assert.ok(report.delta(3.9,1,{unit:'건',decimals:1}).includes('+2.9건'));
 });
+test('day and Monday-Sunday week bins cross month/year boundaries without overlap',()=>{
+  assert.equal(report.bucket('week','2026-08-02').from,'2026-07-27');
+  assert.equal(report.bucket('week','2026-08-03').from,'2026-08-03');
+  assert.equal(report.bucket('week','2027-01-01').from,'2026-12-28');
+  const input=[row('2026-07-31'),row('2026-08-01'),row('2026-08-02'),row('2026-08-03'),row('2026-08-10')];
+  const weeks=report.visibleSeries(input,'week','2026-08-01','2026-08-09');
+  assert.equal(weeks.length,2);assert.equal(weeks[0].total,2);assert.equal(weeks[0].start,'2026-08-01');assert.equal(weeks[0].cutoff,'2026-08-02');assert.equal(weeks[0].partial,true);assert.equal(weeks[1].total,1);
+  const daily=report.visibleSeries(input,'day','2026-08-01','2026-08-09');assert.equal(daily.length,3);assert.equal(daily[2].previousTotal,1);
+});
+test('all aggregation units retain the same selected consultation total',()=>{
+  const input=Array.from({length:70},(_,i)=>row(new Date(Date.UTC(2026,6,25+i)).toISOString().slice(0,10)));
+  for(const unit of ['day','week','month','quarter']){
+    const d=report.build(input,'range',2026,0,'2026-09-24',{from:'2026-08-01',to:'2026-09-30',unit});
+    assert.equal(d.items.reduce((sum,p)=>sum+p.total,0),55);assert.equal(d.current.total,55);assert.equal(d.unit,unit);
+  }
+});
+test('monthly demand compares August against September inside the chosen range',()=>{
+  const input=[row('2026-07-31',{models:['제외']}),row('2026-08-01',{models:['쏘나타','쏘나타']}),row('2026-08-02',{models:['GV70']}),row('2026-09-01',{models:['쏘나타'],inquiryType:'판매'}),row('2026-09-02',{models:['쏘나타']})];
+  const d=report.build(input,'range',2026,0,'2026-10-01',{from:'2026-08-01',to:'2026-09-30',unit:'month'});
+  assert.equal(d.compareA.from,'2026-08-01');assert.equal(d.compareB.from,'2026-09-01');
+  const models=report.demandData(d.compareA,d.compareB,'models',10);
+  assert.equal(models.find(p=>p.label==='쏘나타').a,1);assert.equal(models.find(p=>p.label==='쏘나타').b,2);assert.ok(!models.some(p=>p.label==='제외'));
+  const html=report.reportHtml(d,'전체','테스트');assert.ok(html.includes('+1건'));assert.ok(html.includes('+50.0%p'));assert.ok(html.includes('월별 비교'));
+});
+test('custom pair selection is honored and never compares the same bucket to itself',()=>{
+  const input=[row('2026-07-01'),row('2026-08-01'),row('2026-09-01')],selection={from:'2026-07-01',to:'2026-09-30',unit:'month',compareA:'2026-07-01',compareB:'2026-09-01'};
+  const d=report.build(input,'range',2026,0,'2026-10-01',selection);assert.equal(d.compareA.from,'2026-07-01');assert.equal(d.compareB.from,'2026-09-01');
+  const same=report.build(input,'range',2026,0,'2026-10-01',{...selection,compareA:selection.compareB});assert.notEqual(same.compareA.from,same.compareB.from);
+  const one=report.build([input[0]],'range',2026,0,'2026-10-01',selection);assert.equal(one.compareA,null);assert.ok(report.reportHtml(one,'전체','테스트').includes('비교할 구간이 부족'));
+});
+test('long daily reports paginate every record and invalid September 31 is rejected',()=>{
+  const input=Array.from({length:30},(_,i)=>row(`2026-08-${String(i+1).padStart(2,'0')}`));
+  const d=report.build(input,'range',2026,0,'2026-10-01',{from:'2026-08-01',to:'2026-09-30',unit:'day'});
+  const html=report.reportHtml(d,'전체','테스트');assert.equal((html.match(/data-report-page/g)||[]).length,5);assert.equal((html.match(/<tr class=/g)||[]).length,30);assert.ok(!html.includes('NaN'));assert.equal(report.validDate('2026-09-31'),false);
+});
