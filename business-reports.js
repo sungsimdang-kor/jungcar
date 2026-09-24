@@ -48,6 +48,7 @@
     const contacts=new Set(rows.map(r=>String(r.phone||'').replace(/\D/g,'')).filter(Boolean));
     const count=rows.length;
     return {total:count,customers:contacts.size,daily:days(from,to)>0?count/days(from,to):null,
+      financeCount:rows.filter(r=>r.financeStatus==='예').length,visitCount:rows.filter(r=>r.visitStatus==='예').length,
       averageBudget:budgets.length?budgets.reduce((a,b)=>a+b,0)/budgets.length:null,budgetCount:budgets.length,
       finance:count?rows.filter(r=>r.financeStatus==='예').length/count*100:null,
       visit:count?rows.filter(r=>r.visitStatus==='예').length/count*100:null};
@@ -91,7 +92,7 @@
   }
   function chart(items,title){
     if(!items.length)return '<p class="br-empty">선택 기간에 표시할 상담 기록이 없습니다.</p>';
-    if(items.length===1){const p=items[0];return `<div class="br-single-period"><div><strong>${esc(p.label)}${p.partial?' · 부분 집계':''}</strong><p>${p.start} ~ ${p.cutoff} · 기록이 있는 ${unitNouns[p.mode]} 1개</p></div><b>${number(p.total)}<span>건</span></b></div>`;}
+    if(items.length===1){const p=items[0];return `<div class="br-single-period"><div><strong>${esc(p.label)}${p.partial?' · 부분 집계':''}</strong><p>${p.start} ~ ${p.cutoff}</p></div><b>${number(p.total)}<span>건</span></b></div>`;}
     const W=1200,H=280,left=55,right=28,top=35,bottom=55,max=Math.max(3,Math.ceil(Math.max(0,...items.map(p=>p.total))/3)*3);
     const plotH=H-top-bottom,step=(W-left-right)/items.length;
     const grid=Array.from({length:4},(_,i)=>{const y=top+plotH*i/3;return `<line x1="${left}" y1="${y}" x2="${W-right}" y2="${y}" stroke="#e4eaf2"/><text x="${left-12}" y="${y+5}" text-anchor="end" fill="#64748b" font-size="13">${number(max*(3-i)/3)}</text>`;}).join('');
@@ -99,11 +100,23 @@
     return `<svg class="br-chart" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="${esc(title)}"><title>${esc(title)}. ${esc(items.map(p=>`${p.label}${p.partial?' 부분 집계':''} ${p.total}건`).join(', '))}</title>${grid}<polyline points="${points}" fill="none" stroke="#3374dc" stroke-width="3"/>
       ${items.map((p,i)=>{const x=left+step*(i+.5),y=top+plotH*(1-p.total/max),selected=i===items.length-1,show=i%stride===0||selected;return `<circle cx="${x}" cy="${y}" r="${selected?6:items.length>40?2:4}" fill="${selected?'#173765':'#3374dc'}" stroke="white" stroke-width="1"><title>${esc(p.label)}: ${p.total}건</title></circle>${show?`<text x="${x}" y="${y-13}" text-anchor="middle" fill="#173765" font-size="15" font-weight="700">${number(p.total)}</text><text x="${x}" y="${H-27}" text-anchor="middle" fill="#475569" font-size="14">${esc(p.label)}</text>${p.partial?`<text x="${x}" y="${H-8}" text-anchor="middle" fill="#ad6500" font-size="12">부분 집계</text>`:''}`:''}`;}).join('')}</svg>`;
   }
+  function changeCell(value,previous,{unit='',decimals=0,sub='',hasPrevious=false}={}){
+    const missing=value==null||previous==null,diff=hasPrevious&&!missing?value-previous:null;
+    const rate=diff==null?null:previous===0?(value===0?0:null):diff/previous*100;
+    const tone=v=>v==null||v===0?'trend-neutral':v>0?'trend-up':'trend-down';
+    const signed=(v,d,suffix)=>v==null?'—':(v>0?'+':'')+number(v,d)+suffix;
+    return '<div class="br-stat-cell"><strong>'+number(value,decimals)+(value==null?'':unit)+'</strong>'+(sub?'<span class="br-stat-sub">'+esc(sub)+'</span>':'')+
+      '<span class="br-stat-delta"><i>증감</i> <b class="'+tone(diff)+'">'+signed(diff,decimals,unit)+'</b></span>'+
+      '<small class="br-stat-rate"><i>증감률</i> <b class="'+tone(rate)+'">'+signed(rate,1,'%')+'</b></small></div>';
+  }
   function periodTable(items,unit='month',previousItem=null){
     if(!items.length)return '<p class="br-empty">선택 기간에 표시할 상담 기록이 없습니다.</p>';
-    return '<div class="br-table-scroll"><table class="br-table"><thead><tr><th>기간</th><th>상담 수</th><th>고객 수</th><th>이전 선택 구간 대비</th><th>일평균</th><th>평균 최대 예산</th><th>할부 요청</th><th>방문·예약</th></tr></thead><tbody>'+items.map((p,i)=>{
-      const prior=i?items[i-1]:previousItem;
-      return '<tr class="'+(i===items.length-1?'br-selected-row':'')+'"><th>'+esc(p.label)+(p.partial?'<span class="br-inline-tag">부분 집계</span>':'')+'</th><td>'+number(p.total)+'건</td><td>'+number(p.customers)+'명</td><td>'+(prior?delta(p.total,prior.total,{unit:'건'}):'—')+'</td><td>'+number(p.daily,1)+'건</td><td>'+number(p.averageBudget)+(p.averageBudget==null?'':'만원')+'</td><td>'+number(p.finance,1)+(p.finance==null?'':'%')+'</td><td>'+number(p.visit,1)+(p.visit==null?'':'%')+'</td></tr>';
+    const headers=['기간','상담 수','고객 수','일평균 상담','평균 최대 예산','할부 요청','방문·예약'];
+    return '<div class="br-table-scroll"><table class="br-table br-customer-metrics"><thead><tr>'+headers.map(h=>'<th>'+h+'</th>').join('')+'</tr></thead><tbody>'+items.map((p,i)=>{
+      const prior=i?items[i-1]:previousItem,cell=(key,suffix,decimals=0,sub='')=>'<td>'+changeCell(p[key],prior?.[key],{unit:suffix,decimals,sub,hasPrevious:!!prior})+'</td>';
+      return '<tr class="'+(i===items.length-1?'br-selected-row':'')+'"><th>'+esc(p.label)+(p.partial?'<span class="br-inline-tag">부분 집계</span>':'')+'</th>'+
+        cell('total','건')+cell('customers','명')+cell('daily','건',1)+cell('averageBudget','만원')+
+        cell('financeCount','건',0,number(p.finance,1)+'%')+cell('visitCount','건',0,number(p.visit,1)+'%')+'</tr>';
     }).join('')+'</tbody></table></div>';
   }
   function build(rows,mode,year,index,asOf,selection={}){
@@ -130,7 +143,7 @@
       .sort((x,y)=>(y.a+y.b)-(x.a+x.b)||String(x.label).localeCompare(String(y.label),'ko')).slice(0,limit);
   }
   function reportHtml(data,filterSummary,createdAt){
-    return window.JungcarReportLayout.render(data,filterSummary,createdAt,{chart,periodTable,delta,groups,number,esc,unitNames});
+    return window.JungcarReportLayout.render(data,filterSummary,createdAt,{chart,periodTable,delta,changeCell,groups,number,esc,unitNames});
   }
   function mount(){
     const now=today();
@@ -138,7 +151,7 @@
     if(state.mode!=='range'){const p=period(state.mode,state.year,state.period);state.from=p.from;state.to=p.to;}
     const years=[...new Set([Number(now.slice(0,4)),state.year,...leads.filter(r=>validDate(r.inquiryDate)).map(r=>Number(r.inquiryDate.slice(0,4)))])].sort((a,b)=>b-a);
     const periodControls=state.mode==='range'?`<label>시작일<input type="date" name="from" value="${esc(state.from)}"></label><label>종료일<input type="date" name="to" value="${esc(state.to)}"></label>`:`<label>연도<select name="year">${years.map(y=>`<option ${y===state.year?'selected':''}>${y}</option>`).join('')}</select></label><label>${state.mode==='quarter'?'분기':'월'}<select name="period">${Array.from({length:state.mode==='quarter'?4:12},(_,i)=>`<option value="${i+1}" ${i+1===state.period?'selected':''}>${i+1}${state.mode==='quarter'?'분기':'월'}</option>`).join('')}</select></label>`;
-    app.innerHTML=`<section class="panel br-controls"><div class="br-control-title"><div><h2>기간과 집계 단위로 분석하세요</h2><p>월별 최대 2개월 · 분기별 최대 4개 · 일별 62일 · 주별 두 달. 긴 PNG 보고서는 페이지별 이미지 ZIP으로 저장됩니다.</p></div><div class="report-actions"><button id="businessPng">PNG 저장</button><button id="businessPdf" class="br-primary">PDF 보고서 저장</button></div></div><form id="businessPeriod" class="br-period-controls"><label>기간 설정<select name="mode"><option value="month" ${state.mode==='month'?'selected':''}>한 달 선택</option><option value="quarter" ${state.mode==='quarter'?'selected':''}>한 분기 선택</option><option value="range" ${state.mode==='range'?'selected':''}>기간 직접 설정</option></select></label>${periodControls}<label>집계 단위<select name="unit">${Object.entries(unitNames).map(([key,label])=>`<option value="${key}" ${key===state.unit?'selected':''}>${label}${key==='week'?' (월~일)':''}</option>`).join('')}</select></label><button type="button" id="businessThisPeriod">이번 ${state.mode==='quarter'?'분기':'달'}</button></form><div id="businessCompareControls" class="br-compare-controls"></div><details class="br-extra-filters"><summary>상세 필터 · 차종, 문의 종류, 할부, 방문, 예산</summary><form id="businessFilters" class="filter-grid">${analysisFilterFields(state.filters)}</form><button type="button" id="businessResetFilters">필터 초기화</button></details></section><div id="businessReport" class="business-report" aria-live="polite"></div>`;
+    app.innerHTML=`<section class="panel br-controls"><div class="br-control-title"><div><h2>리포트</h2></div><div class="report-actions"><button id="businessPng">PNG 저장</button><button id="businessPdf" class="br-primary">PDF 보고서 저장</button></div></div><form id="businessPeriod" class="br-period-controls"><label>기간 설정<select name="mode"><option value="month" ${state.mode==='month'?'selected':''}>한 달 선택</option><option value="quarter" ${state.mode==='quarter'?'selected':''}>한 분기 선택</option><option value="range" ${state.mode==='range'?'selected':''}>기간 직접 설정</option></select></label>${periodControls}<label>집계 단위<select name="unit">${Object.entries(unitNames).map(([key,label])=>`<option value="${key}" ${key===state.unit?'selected':''}>${label}${key==='week'?' (월~일)':''}</option>`).join('')}</select></label><button type="button" id="businessThisPeriod">이번 ${state.mode==='quarter'?'분기':'달'}</button></form><div id="businessCompareControls" class="br-compare-controls"></div><details class="br-extra-filters"><summary>상세 필터 · 차종, 문의 종류, 할부, 방문, 예산</summary><form id="businessFilters" class="filter-grid">${analysisFilterFields(state.filters)}</form><button type="button" id="businessResetFilters">필터 초기화</button></details></section><div id="businessReport" class="business-report" aria-live="polite"></div>`;
     const form=document.querySelector('#businessPeriod');
     form.addEventListener('submit',event=>event.preventDefault());
     form.addEventListener('change',event=>{
@@ -173,11 +186,11 @@
     const data=build(filteredAnalysisRows(state.filters),state.mode,state.year,state.period,now,{from:state.from,to:state.to,unit:state.unit,selectedPeriods:state.selectedPeriods});
     if(limits[state.unit]){
       const chosen=new Set(data.items.map(p=>p.from)),max=limits[state.unit];
-      document.querySelector('#businessCompareControls').innerHTML='<strong>표시할 기간 선택 · '+unitNames[state.unit]+'</strong><p>최대 '+max+'개 선택 · 현재 '+data.items.length+'개. 체크한 기간만 모든 합계·비교·출력에 반영합니다. 처음에는 최근 '+max+'개 기간이 선택됩니다. 다른 기간을 선택하려면 기존 체크를 해제하세요.</p><div class="br-period-checks">'+data.availableItems.map(p=>'<label><input type="checkbox" name="reportPeriod" value="'+p.from+'" '+(chosen.has(p.from)?'checked':chosen.size>=max?'disabled':'')+'><span>'+esc(p.label)+(p.partial?' <small>부분 집계</small>':'')+'</span></label>').join('')+'</div>';
-    }else document.querySelector('#businessCompareControls').innerHTML='<strong>'+unitNames[state.unit]+' · 수치표로 표시</strong><p>'+(state.unit==='day'?'최대 62일':'시작일부터 두 달 이내 · 주 경계는 월요일~일요일')+' / '+state.from+' ~ '+state.to+' / 기록이 있는 '+data.items.length+'개 구간. 빈 구간은 생략하되 일평균에는 상담 없는 날도 포함합니다.</p>';
+      document.querySelector('#businessCompareControls').innerHTML='<strong>'+unitNames[state.unit]+' · '+data.items.length+' / '+max+'</strong><div class="br-period-checks">'+data.availableItems.map(p=>'<label><input type="checkbox" name="reportPeriod" value="'+p.from+'" '+(chosen.has(p.from)?'checked':chosen.size>=max?'disabled':'')+'><span>'+esc(p.label)+(p.partial?' <small>부분 집계</small>':'')+'</span></label>').join('')+'</div>';
+    }else document.querySelector('#businessCompareControls').innerHTML='';
     data.insights=window.JungcarReportInsights.analyze(data.items,{includeMemo:false});
     report.innerHTML=reportHtml(data,analysisFilterSummary(state.filters),reportGeneratedAt());
     if(!data.items.length)for(const id of ['businessPng','businessPdf'])document.getElementById(id).disabled=true;
   }
-  window.JungcarBusinessReports={mount,refresh,period,periodContext,rangeContext,metrics,bucket,visibleSeries,build,reportHtml,validDate,rangeLimit,delta,demandData};
+  window.JungcarBusinessReports={mount,refresh,period,periodContext,rangeContext,metrics,bucket,visibleSeries,build,reportHtml,validDate,rangeLimit,delta,changeCell,periodTable,demandData};
 })();
