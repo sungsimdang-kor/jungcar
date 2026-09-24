@@ -1,8 +1,8 @@
 .rc-empty { padding:24px;text-align:center;font-size:14px;color:#64748b; }
-.rc-pies { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:22px;align-items:start; }
+.rc-pies { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-rows:1fr;gap:22px;align-items:stretch; }
 .rc-pie-card { min-width:0;border:1px solid #e2e8f0;border-radius:8px;background:#fff;padding:16px 0 8px; }
 .rc-pie-card>h3 { color:#173765;font-size:17px;margin:0 18px 6px; }
-.rc-pie-card>p { color:#64748b;font-size:12px;margin:0 18px 6px; }
+.rc-pie-card>p { color:#64748b;font-size:12px;margin:0 18px 6px;min-height:36px;line-height:18px; }
 .rc-pie { display:block;width:100%;height:auto;overflow:visible;font-family:Arial,"Apple SD Gothic Neo","Malgun Gothic",sans-serif; }
 .rc-demand-bars { display:grid;gap:12px; }
 .rc-demand-category { border-bottom:1px solid #e3eaf3;padding-bottom:12px;min-width:0; }

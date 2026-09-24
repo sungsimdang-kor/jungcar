@@ -82,7 +82,7 @@
     const diff=current-previous,sign=diff>0?'+':'';
     if(rate)return `<span class="${diff>0?'br-up':diff<0?'br-down':'br-neutral'}">${sign}${number(diff,1)}%p</span>`;
     const change=previous===0?(current===0?'변화 없음':'기준값 0 · 증감률 산출 제외'):`${diff>0?'+':''}${number(diff/previous*100,1)}%`;
-    return `<span class="${diff>0?'br-up':diff<0?'br-down':'br-neutral'}">${sign}${number(diff,decimals)}${unit}</span><small>${change}</small>`;
+    return `<span class="${diff>0?'br-up':diff<0?'br-down':'br-neutral'}">${sign}${number(diff,decimals)}${unit}</span><small class="${diff>0?'br-up':diff<0?'br-down':'br-neutral'}">${change}</small>`;
   }
   function groups(rows,key){
     const counts=new Map();
@@ -175,7 +175,7 @@
       const chosen=new Set(data.items.map(p=>p.from)),max=limits[state.unit];
       document.querySelector('#businessCompareControls').innerHTML='<strong>표시할 기간 선택 · '+unitNames[state.unit]+'</strong><p>최대 '+max+'개 선택 · 현재 '+data.items.length+'개. 체크한 기간만 모든 합계·비교·출력에 반영합니다. 처음에는 최근 '+max+'개 기간이 선택됩니다. 다른 기간을 선택하려면 기존 체크를 해제하세요.</p><div class="br-period-checks">'+data.availableItems.map(p=>'<label><input type="checkbox" name="reportPeriod" value="'+p.from+'" '+(chosen.has(p.from)?'checked':chosen.size>=max?'disabled':'')+'><span>'+esc(p.label)+(p.partial?' <small>부분 집계</small>':'')+'</span></label>').join('')+'</div>';
     }else document.querySelector('#businessCompareControls').innerHTML='<strong>'+unitNames[state.unit]+' · 수치표로 표시</strong><p>'+(state.unit==='day'?'최대 62일':'시작일부터 두 달 이내 · 주 경계는 월요일~일요일')+' / '+state.from+' ~ '+state.to+' / 기록이 있는 '+data.items.length+'개 구간. 빈 구간은 생략하되 일평균에는 상담 없는 날도 포함합니다.</p>';
-    data.insights=window.JungcarReportInsights.analyze(data.items,{excludedTerms:typeof CAR_MODELS==='undefined'?[]:CAR_MODELS.flatMap(item=>[item.name,item.maker])});
+    data.insights=window.JungcarReportInsights.analyze(data.items,{includeMemo:false});
     report.innerHTML=reportHtml(data,analysisFilterSummary(state.filters),reportGeneratedAt());
     if(!data.items.length)for(const id of ['businessPng','businessPdf'])document.getElementById(id).disabled=true;
   }

@@ -182,15 +182,15 @@
     }
     return out.slice(0,4);
   }
-  function analyze(items,{excludedTerms=[]}={}){
+  function analyze(items,{excludedTerms=[],includeMemo=true}={}){
     const ordered=(Array.isArray(items)?items:[]).filter(item=>item&&Array.isArray(item.rows)).slice().sort((a,b)=>String(a.from||a.start||'').localeCompare(String(b.from||b.start||'')));
     const periods=ordered.map(periodMetrics),comparisons=periods.slice(1).map((period,index)=>compare(periods[index],period));
     const cautions=[];
     if(periods.some(period=>period.partial))cautions.push('진행 중이거나 선택 범위에서 잘린 기간은 부분 집계입니다.');
     if(periods.some(period=>period.total<20))cautions.push('20건 미만 구간은 작은 표본이므로 일반적인 고객 성향으로 단정하지 마세요.');
     if(periods.length<2)cautions.push('변화 비교를 위해 기록이 있는 기간을 두 개 이상 선택하세요.');
-    const memoTerms=memoAnalysis(ordered,periods,exclusions(ordered,excludedTerms));
-    return {periods,comparisons,memoTerms,memoCoverage:coverage(ordered,periods),suggestions:suggestions(comparisons,memoTerms),cautions,
+    const memoTerms=includeMemo?memoAnalysis(ordered,periods,exclusions(ordered,excludedTerms)):[];
+    return {periods,comparisons,memoTerms,memoCoverage:includeMemo?coverage(ordered,periods):null,suggestions:suggestions(comparisons,memoTerms),cautions,
       methodology:{weekdays:'요일별 건수를 해당 기간의 동일 요일 수로 나눈 평균으로 비교합니다. 동률 요일은 모두 표시합니다.',
         finance:'할부 조회 요청 토글이 켜진 기록(financeStatus=예)을 집계하며 문의 종류나 메모 단어로 추정하지 않습니다.',
         memo:'개인정보 보호를 위해 업무 키워드 사전만 탐지합니다. 상담 1건당 단어 1회, 총 3건 이상을 표시하며 전화번호가 있는 기록은 2명 이상이어야 합니다. 차종·제조사·유종·트림·제원 및 일반 표현은 제외합니다. 단어 언급은 실제 수요나 긍정·부정을 뜻하지 않습니다.',

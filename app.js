@@ -383,7 +383,7 @@ function renderOverview() {
       ${kpi(`${monthLabel(currentMonth)} 상담수`, `${fmt(currentMonthRows.length)}건`, `${latestKey} 기준`)}
       ${kpi("일평균 응대수", `${(dated.length / Math.max(dates.length, 1)).toFixed(1)}건`, `전체 DB ${fmt(dates.length)}일 기준`)}
       ${kpi("최근 한달 인기 문의 차종", recentTopModel?.[0] || "-", `최근 31일 · ${recentTopModel?.[1] || 0}건`)}
-      ${kpi(`${monthLabel(currentMonth)} 동기간 증가율`, growth === null ? "신규" : `${growth}%`, `전월 동기간 ${fmt(previousCount)}건 대비`)}
+      ${kpi(`${monthLabel(currentMonth)} 동기간 증가율`, growth === null ? "신규" : `<span class="${Number(growth)>0?'trend-up':Number(growth)<0?'trend-down':'trend-neutral'}">${Number(growth)>0?'+':''}${growth}%</span>`, `전월 동기간 ${fmt(previousCount)}건 대비`)}
     </section>
     <section class="grid">
       ${card("일별 문의 현황", "문의 날짜 기준 상담 건수", verticalBars(Object.entries(byDate).sort()), "wide")}
@@ -640,7 +640,7 @@ function comparisonBars(a,b,totalA,totalB,labels){
   return `<div class="comparison-bars">${labels.map(label=>{
     const av=a[label]||0,bv=b[label]||0,ap=totalA?av/totalA*100:0,bp=totalB?bv/totalB*100:0;
     const delta=bp-ap;
-    return `<div class="comparison-bar-row"><header><strong>${escapeHtml(label)}</strong><small>${!totalA||!totalB?'비율 차이 —':`B − A ${delta>0?'+':''}${delta.toFixed(1)}%p`}</small></header>
+    return `<div class="comparison-bar-row"><header><strong>${escapeHtml(label)}</strong><small class="${!totalA||!totalB?'trend-neutral':delta>0?'trend-up':delta<0?'trend-down':'trend-neutral'}">${!totalA||!totalB?'비율 차이 —':`B − A ${delta>0?'+':''}${delta.toFixed(1)}%p`}</small></header>
       <div class="comparison-bar"><span class="cohort-a">A</span><i><em style="width:${Math.min(ap,100)}%"></em></i><b>${fmt(av)}건 <small>(${totalA?ap.toFixed(1)+'%':'—'})</small></b></div>
       <div class="comparison-bar comparison-bar-b"><span class="cohort-b">B</span><i><em style="width:${Math.min(bp,100)}%"></em></i><b>${fmt(bv)}건 <small>(${totalB?bp.toFixed(1)+'%':'—'})</small></b></div></div>`;
   }).join('')}</div>`;

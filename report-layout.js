@@ -4,7 +4,7 @@
     const {number:n,esc:e,delta,chart,periodTable,groups,unitNames}=helpers;
     const {items,unit,current:m,context:c}=data,tabular=unit==='day'||unit==='week';
     const charts=window.JungcarReportCharts;
-    const insights=data.insights||window.JungcarReportInsights.analyze(items);
+    const insights=data.insights||window.JungcarReportInsights.analyze(items,{includeMemo:false});
     const pages=[],selectedRows=items.flatMap(p=>p.rows),titles=items.map(p=>p.label);
     const heading=(title,description='')=>'<header class="br-page-heading"><span>JUNGCAR TV · '+unitNames[unit]+'</span><h2>'+e(title)+'</h2><p>'+e(description)+'</p></header>';
     const section=(title,note='')=>'<div class="br-section-heading"><div><h3>'+e(title)+'</h3></div><p>'+e(note)+'</p></div>';
@@ -54,12 +54,8 @@
     }else{
       pages.push(heading('트렌드 변화와 운영 참고','통계적 인과관계가 아닌 상담 기록의 변화입니다. 광고 조정 전 표본과 집계 일수를 확인하세요.')+
         transitionCards(transitions)+section('첫 선택 기간부터 마지막까지','중간 변화는 위의 각 구간 비교를 참고하세요.')+
-        transitionTable(items.length>2?window.JungcarReportInsights.analyze([items[0],items.at(-1)]).comparisons:transitions)+warning);
+        transitionTable(items.length>2?window.JungcarReportInsights.analyze([items[0],items.at(-1)],{includeMemo:false}).comparisons:transitions)+warning);
     }
-    const memoBatches=tabular&&insights.memoTerms.length?Array.from({length:Math.ceil(items.length/6)},(_,i)=>insights.periods.slice(i*6,i*6+6)):[insights.periods];
-    for(const batch of memoBatches)pages.push(heading('메모 반복 표현과 변화','차종·제조사·유종·주요 트림 및 숫자·연락처 등을 제외한 규칙 기반 참고 정보')+
-      memoTable(insights,batch)+
-      '<div class="br-quality"><h3>해석 시 주의</h3><p class="br-chart-note">같은 상담에서 같은 표현을 여러 번 써도 1건입니다. 반복 표현은 고객 의도나 구매 확정을 뜻하지 않으며, 미입력·부정 표현·작성 습관에 영향을 받습니다. 차종·트림 제외는 등록 목록과 일반 용어를 이용하므로 알려지지 않은 표현이 남을 수 있습니다. 메모 원문이나 연락처는 보고서에 포함하지 않고, 외부 AI로 전송하지 않습니다.</p><p class="br-chart-note">'+e((insights.cautions||[]).join(' '))+'</p></div>');
     return finish();
 
     function finish(){
@@ -73,9 +69,11 @@
     }
     function transitionTable(list){
       if(!list.length)return '<p class="br-empty">변화를 비교하려면 기록이 있는 기간을 2개 이상 선택해 주세요.</p>';
-      return table(['기간 변화','상담 증감','일평균 증감','할부 요청 건수','할부 요청률 변화','방문·예약률 변화'],list.map(t=>'<tr><th>'+e(t.fromLabel)+'<br>→ '+e(t.toLabel)+'</th><td>'+delta(t.total.after,t.total.before,{unit:'건'})+'</td><td>'+delta(t.daily.after,t.daily.before,{unit:'건',decimals:1})+'</td><td>'+signed(t.finance.countChange)+'건</td><td>'+signed(t.finance.percentagePoints,1)+'%p</td><td>'+signed(t.visit.percentagePoints,1)+'%p</td></tr>'));
+      return table(['기간 변화','상담 증감','일평균 증감','할부 요청 건수','할부 요청률 변화','방문·예약률 변화'],list.map(t=>'<tr><th>'+e(t.fromLabel)+'<br>→ '+e(t.toLabel)+'</th><td>'+delta(t.total.after,t.total.before,{unit:'건'})+'</td><td>'+delta(t.daily.after,t.daily.before,{unit:'건',decimals:1})+'</td><td>'+signed(t.finance.countChange,0,'건')+'</td><td>'+signed(t.finance.percentagePoints,1,'%p')+'</td><td>'+signed(t.visit.percentagePoints,1,'%p')+'</td></tr>'));
     }
-    function signed(value,decimals=0){return value==null?'—':(value>0?'+':'')+n(value,decimals);}
+    function tone(value){return value==null?'trend-neutral':value>0?'trend-up':value<0?'trend-down':'trend-neutral';}
+    function signed(value,decimals=0,unit=''){return '<span class="'+tone(value)+'">'+(value==null?'—':(value>0?'+':'')+n(value,decimals)+unit)+'</span>';}
+    function changed(before,after,unit='',decimals=0){return n(before,decimals)+' → <span class="'+tone(before==null||after==null?null:after-before)+'">'+n(after,decimals)+unit+'</span>';}
     function transitionCards(list){
       if(!list.length)return '<p class="br-empty">트렌드를 비교하려면 기간을 2개 이상 선택해 주세요.</p>';
       return '<div class="br-insight-grid">'+list.map(t=>{
@@ -86,21 +84,9 @@
         if(t.finance.percentagePoints>=5)advice+=' 할부 절차·필요 서류 안내를 보강할지 검토할 수 있습니다.';
         if(t.visit.percentagePoints<0&&t.total.change>0)advice+=' 문의량 증가에 비해 방문 비중이 낮아져, 문의 후 방문 안내 과정을 확인할 필요가 있습니다.';
         const model=t.models.find(p=>Math.abs(p.percentagePoints)>=.1),type=t.inquiryTypes.find(p=>Math.abs(p.percentagePoints)>=.1);
-        const changeLine=(label,value)=>value?'<div><dt>'+label+' · '+e(value.label)+'</dt><dd>'+n(value.shareBefore,1)+'% → '+n(value.shareAfter,1)+'% ('+signed(value.percentagePoints,1)+'%p)</dd></div>':'';
-        return '<article class="br-insight-card"><h3>'+e(t.fromLabel)+' → '+e(t.toLabel)+'</h3><dl><div><dt>하루 평균 최다 문의 요일</dt><dd>'+e(from||'—')+' → '+e(to||'—')+'</dd></div><div><dt>할부 조회 요청</dt><dd>'+n(t.finance.beforeCount)+' → '+n(t.finance.afterCount)+'건 / '+signed(t.finance.percentagePoints,1)+'%p</dd></div><div><dt>일평균 상담</dt><dd>'+n(t.daily.before,1)+' → '+n(t.daily.after,1)+'건</dd></div>'+changeLine('비중 변화가 가장 큰 차종',model)+changeLine('비중 변화가 가장 큰 문의 종류',type)+'</dl><p>'+e(advice)+'</p><small>표본이 적거나 기간이 미완료인 경우 탐색적 참고로만 사용하세요.</small></article>';
+        const changeLine=(label,value)=>value?'<div><dt>'+label+' · '+e(value.label)+'</dt><dd>'+n(value.shareBefore,1)+'% → <span class="'+tone(value.percentagePoints)+'">'+n(value.shareAfter,1)+'%</span> ('+signed(value.percentagePoints,1,'%p')+')</dd></div>':'';
+        return '<article class="br-insight-card"><h3>'+e(t.fromLabel)+' → '+e(t.toLabel)+'</h3><dl><div><dt>하루 평균 최다 문의 요일</dt><dd>'+e(from||'—')+' → '+e(to||'—')+'</dd></div><div><dt>할부 조회 요청</dt><dd>'+changed(t.finance.beforeCount,t.finance.afterCount,'건')+' / '+signed(t.finance.percentagePoints,1,'%p')+'</dd></div><div><dt>일평균 상담</dt><dd>'+changed(t.daily.before,t.daily.after,'건',1)+'</dd></div>'+changeLine('비중 변화가 가장 큰 차종',model)+changeLine('비중 변화가 가장 큰 문의 종류',type)+'</dl><p>'+e(advice)+'</p><small>표본이 적거나 기간이 미완료인 경우 탐색적 참고로만 사용하세요.</small></article>';
       }).join('')+'</div>';
-    }
-    function memoTable(result,periods){
-      const terms=(result.memoTerms||[]).slice(0,10);
-      const note='선택한 각 기간의 언급 건수와 비중 · 증감은 시간순 이전 선택 기간 대비';
-      const coverage=items.map(p=>({label:p.label,count:p.rows.filter(r=>String(r.conditionRaw||'').trim()).length,total:p.total}));
-      const allMemos=coverage.reduce((sum,p)=>sum+p.count,0);
-      const intro='<p class="br-chart-note">'+note+'<br>메모 입력 '+n(allMemos)+' / '+n(m.total)+'건. 비중의 분모는 메모 입력 건수가 아닌 각 기간의 전체 상담 수입니다.<br>'+e(result.methodology?.memo||'업무용 키워드 사전에서 상담 3건 이상, 확인 가능한 고객 2명 이상의 반복 표현을 표시합니다.')+'</p>';
-      if(!terms.length)return intro+'<p class="br-empty">반복 기준을 충족하는 표현이 없습니다. 같은 표현이 여러 상담에 나타나면 표시됩니다.</p>';
-      return intro+table(['반복 표현','전체 언급',...periods.map(p=>p.label)],terms.map(term=>'<tr><th>'+e(term.term)+'</th><td>'+n(term.total)+'건</td>'+periods.map(p=>{
-        const index=term.periods.findIndex(v=>v.key===p.key),value=term.periods[index],prior=index>0?term.periods[index-1]:null;
-        return '<td>'+n(value?.count||0)+'건 ('+n(value?.share||0,1)+'%)'+(prior?'<small>'+signed(value.count-prior.count)+'건 / '+signed(value.share-prior.share,1)+'%p</small>':'')+'</td>';
-      }).join('')+'</tr>'))+'<p class="br-chart-note">전체 언급은 같은 상담 내 중복 표현을 제거한 건수입니다. 전화번호별 반복 여부도 확인하며 개인정보성 토큰은 제외합니다.</p>';
     }
   }
   window.JungcarReportLayout={render};

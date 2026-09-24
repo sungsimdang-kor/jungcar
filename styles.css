@@ -753,7 +753,8 @@ textarea { resize:vertical; }
 .comparison-values strong { color:var(--navy);font-size:clamp(20px,2vw,28px);overflow-wrap:anywhere; }
 .comparison-delta { margin:16px 0 0;padding-top:12px;border-top:1px solid var(--line);color:var(--muted);font-size:14px; }
 .comparison-delta b { margin-left:8px; }.comparison-delta small { display:block;font-size:13px;margin-top:4px; }
-.comparison-delta.increase b { color:#8054cf; }.comparison-delta.decrease b { color:var(--blue); }
+.comparison-delta.increase,.comparison-delta.increase b,.comparison-delta.increase small { color:var(--trend-up); }
+.comparison-delta.decrease,.comparison-delta.decrease b,.comparison-delta.decrease small { color:var(--trend-down); }
 .comparison-note { color:var(--muted);font-size:13px;line-height:1.6; }
 .comparison-note p { margin:4px 0; }.panel.comparison-note { padding:20px; }
 .comparison-bars { display:grid;gap:16px; }
@@ -772,3 +773,8 @@ textarea { resize:vertical; }
   .comparison-intro{align-items:start;flex-direction:column;}.comparison-metric{padding:16px;}
 }
 @media(max-width:420px){.comparison-metrics{grid-template-columns:1fr;}.comparison-filter{padding:16px;}.comparison-bar{grid-template-columns:16px minmax(0,1fr) 115px;}}
+:root { --trend-up:#137333; --trend-down:#b3261e; --trend-neutral:#64748b; }
+/* The sign, not the category/period color, communicates numerical change. */
+.trend-up,.br-up { color:var(--trend-up)!important; }
+.trend-down,.br-down { color:var(--trend-down)!important; }
+.trend-neutral,.br-neutral { color:var(--trend-neutral)!important; }

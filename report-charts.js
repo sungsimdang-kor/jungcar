@@ -52,14 +52,14 @@
     }
     return labels;
   }
-  function pie(item){
+  function pie(item,sharedHeight=336){
     const values=[...groups(rows(item),'inquiryType')].sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0],'ko'));
     const count=values.reduce((sum,[,value])=>sum+value,0);
-    if(!count)return `<article class="rc-pie-card"><h3>${esc(item.label)}</h3>${empty()}</article>`;
+    if(!count)return `<article class="rc-pie-card"><h3>${esc(item.label)}</h3><p>${esc(dateNote(item))}</p><svg class="rc-pie" viewBox="0 0 640 ${sharedHeight}" role="img" aria-label="기록 없음"><text x="320" y="${sharedHeight/2}" text-anchor="middle" fill="#64748b" font-size="14">표시할 상담 기록이 없습니다.</text></svg></article>`;
     let angle=-Math.PI/2;
     const segments=values.map(([label,value])=>{const start=angle;angle+=value/count*Math.PI*2;return {label,value,start,end:angle,color:categoryColor(label)};});
     const sideHeight=side=>segments.filter(p=>(Math.cos((p.start+p.end)/2)>=0?'right':'left')===side).reduce((sum,p)=>sum+(shortName(p.label).length+1)*17+11,0);
-    const width=640,height=Math.max(336,sideHeight('left')+36,sideHeight('right')+36),cx=320,cy=height/2,r=105,inner=59;
+    const width=640,height=Math.max(sharedHeight,sideHeight('left')+36,sideHeight('right')+36),cx=320,cy=height/2,r=105,inner=59;
     const point=(a,radius)=>[cx+Math.cos(a)*radius,cy+Math.sin(a)*radius];
     const path=segment=>{
       if(segments.length===1)return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${segment.color}"><title>${esc(segment.label)} ${count}건 (100.0%)</title></circle>`;
@@ -75,7 +75,14 @@
   }
   function monthlyPies(items){
     if(!items.length)return empty();
-    return `<div class="rc-pies">${items.map(pie).join('')}</div>`;
+    // One shared canvas keeps cards AND ring sizes identical, even with many small categories.
+    const height=Math.max(336,...items.map(item=>{
+      const entries=[...groups(rows(item),'inquiryType')].sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0],'ko'));
+      const count=entries.reduce((sum,[,value])=>sum+value,0),sides={left:0,right:0};let angle=-Math.PI/2;
+      entries.forEach(([label,value])=>{const end=angle+value/count*Math.PI*2;const side=Math.cos((angle+end)/2)>=0?'right':'left';sides[side]+=(shortName(label).length+1)*17+11;angle=end;});
+      return Math.max(sides.left,sides.right)+36;
+    }));
+    return '<div class="rc-pies">'+items.map(item=>pie(item,height)).join('')+'</div>';
   }
   function demandBars(items,key='models',limit=10,start=0,end=limit){
     const all=categoryData(items,key,limit),data=all.slice(start,end),max=Math.max(1,...all.flatMap(p=>p.counts));
